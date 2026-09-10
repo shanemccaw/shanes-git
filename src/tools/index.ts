@@ -15,6 +15,7 @@ import { listSubIssuesTool } from "./list-sub-issues.ts";
 import { setBlockedByTool } from "./set-blocked-by.ts";
 import { listBlockedByTool } from "./list-blocked-by.ts";
 import { moveToStatusTool } from "./move-to-status.ts";
+import { getBoardStatusTool } from "./get-board-status.ts";
 
 /**
  * Every tool this server exposes. The scaffold set (Git #3390) proved the
@@ -43,6 +44,7 @@ export const ALL_TOOLS: ToolDef[] = [
   setBlockedByTool,
   listBlockedByTool,
   moveToStatusTool,
+  getBoardStatusTool,
 ];
 
 export const TOOLS_BY_NAME: Map<string, ToolDef> = new Map(ALL_TOOLS.map((t) => [t.name, t]));

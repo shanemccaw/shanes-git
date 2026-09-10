@@ -84,6 +84,12 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
   same ones already live in `artifacts/api-server/src/routes/admin-build-tracker.ts` — re-verify
   with a read-only `gh api graphql` node lookup if this ever stops moving cards, per that file's
   own "NOT STABLE ACROSS TIME" note.
+- `get_board_status` (Git #3542) — `get_board_status(number)` is the read counterpart
+  `move_to_status` had none of: reads an issue's real current Projects v2 Status column without
+  changing anything. Returns `{ number, onBoard, status }` — `onBoard: false` (not an error) if
+  the issue has no project item yet, `status: null` if it's on the board but Status is unset.
+  Reuses `move-to-status.ts`'s `githubGraphQL()` call and `PROJECT_V2_ID`; read-only, no
+  `context` required.
 
 **Sub-issue hierarchy + blocked_by dependencies (Git #3392):**
 
@@ -125,8 +131,8 @@ change — there was no way to trace which chat did what. Every real write tool 
 `update_issue`, `add_sub_issue`, `remove_sub_issue`, `set_blocked_by`, `post_comment`,
 `close_issue`, `move_to_status` — now requires a `context` string arg. Read-only tools
 (`get_issue`, `search_issues`, `list_sub_issues`, `list_blocked_by`, `list_comments`,
-`get_recent_activity`, `server_status`, `github_whoami`) are untouched — nothing to trace on a
-read.
+`get_recent_activity`, `server_status`, `github_whoami`, `get_board_status`) are untouched —
+nothing to trace on a read.
 
 - **Required, not optional.** A missing or empty `context` is rejected in the handler before any
   GitHub API call fires — the same pre-flight-reject pattern #3394 already established for a
