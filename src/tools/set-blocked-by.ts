@@ -1,6 +1,6 @@
 import type { ToolDef } from "./registry.ts";
 import { addBlockedBy, listBlockedBy, removeBlockedBy } from "../github.ts";
-import { requireInt, requireIntArray } from "./args.ts";
+import { CONTEXT_SCHEMA_PROPERTY, requireContext, requireInt, requireIntArray } from "./args.ts";
 
 /**
  * set_blocked_by(number, blocker_numbers[]) — makes `number`'s real blocked_by
@@ -16,7 +16,8 @@ export const setBlockedByTool: ToolDef = {
   description:
     "Sets number's real blocked_by dependency edges to exactly blocker_numbers[] — adds any missing " +
     "edge and removes any existing edge not in the list (pass [] to clear all blockers). Returns the " +
-    "resulting real blocked_by list.",
+    "resulting real blocked_by list. Required: context (Git #3538 — a short label identifying " +
+    "which chat/session/build is making this write; rejected before any GitHub call if missing).",
   inputSchema: {
     type: "object",
     properties: {
@@ -26,11 +27,13 @@ export const setBlockedByTool: ToolDef = {
         items: { type: "integer" },
         description: "The exact set of issue numbers that should block `number`.",
       },
+      context: CONTEXT_SCHEMA_PROPERTY,
     },
-    required: ["number", "blocker_numbers"],
+    required: ["number", "blocker_numbers", "context"],
     additionalProperties: false,
   },
   handler: async (args) => {
+    requireContext(args);
     const number = requireInt(args.number, "number");
     const desired = requireIntArray(args.blocker_numbers, "blocker_numbers");
     const desiredSet = new Set(desired);

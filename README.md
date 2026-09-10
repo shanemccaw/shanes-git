@@ -117,6 +117,47 @@ assignees, timestamps, comment count.
 With `move_to_status` (Git #3395) landed above, every tool of Feature #3377's original design is
 now shipped.
 
+## Required `context` on every write (Git #3538)
+
+Every write ever made through this server authenticates as the same server-side PAT, so on GitHub
+it always shows as authored by `shanemccaw` regardless of which chat/session actually made the
+change — there was no way to trace which chat did what. Every real write tool — `create_issue`,
+`update_issue`, `add_sub_issue`, `remove_sub_issue`, `set_blocked_by`, `post_comment`,
+`close_issue`, `move_to_status` — now requires a `context` string arg. Read-only tools
+(`get_issue`, `search_issues`, `list_sub_issues`, `list_blocked_by`, `list_comments`,
+`get_recent_activity`, `server_status`, `github_whoami`) are untouched — nothing to trace on a
+read.
+
+- **Required, not optional.** A missing or empty `context` is rejected in the handler before any
+  GitHub API call fires — the same pre-flight-reject pattern #3394 already established for a
+  commentless NOT_PLANNED close. `src/tools/args.ts`'s `requireContext()` is the one shared check
+  every write tool calls first.
+- **Exact shape — a real, reasoned call on the issue's own open question:** a free-text string, no
+  fixed vocabulary or required format. A build dispatched by BuildConsole has a real numeric
+  buildId (e.g. `"build-2207"`); a raw interactive chat has no such id and would be forced into a
+  shape that doesn't fit it. Free text — described in the tool schema as "a build id, a
+  chat/session label, or an Epic/issue number" — covers both without inventing a structure the
+  caller has to fake.
+- **Recorded automatically, no new plumbing needed.** `context` is just another key in the tool's
+  own `args`, and every tool call's full `args` already flows into `github_mcp_activity.params` via
+  the existing `runTool()` / `recordActivity()` path (`src/tools/registry.ts`, `src/activity.ts`) —
+  so it's visible in `get_recent_activity` for every write with zero schema/table changes.
+- **Visible on GitHub itself — the issue's other open question, also a real call:** applied to
+  *every* real comment body this server writes, not `post_comment` alone. `postIssueComment()`
+  calls from both `post_comment` and `close_issue`'s NOT_PLANNED comment are prefixed with a
+  visible `[chat: <context>]\n\n` tag (`tagCommentWithContext()` in `src/tools/args.ts`) — so the
+  trail is readable directly on the issue, not only in the local audit log.
+  `create_issue`/`update_issue`, the sub-issue/`blocked_by` tools, and `move_to_status`
+  deliberately do **not** get a visible tag: an issue's own `body` isn't a comment, and a board
+  move has no text field at all to embed one into — for those, `context` is traceable only through
+  `get_recent_activity`, which is the issue body's own observation about why this doesn't apply
+  uniformly.
+- **Real verification (2026-09-10):** a `post_comment` call with `context` omitted was rejected
+  with `context is required...` before any GitHub request fired; the same call with
+  `context: "build-2207"` succeeded and posted
+  [a real comment on #3538 itself](https://github.com/shanemccaw/Shane-McCaw-MSP/issues/3538)
+  carrying the visible `[chat: build-2207]` tag — that comment doubles as this decision record.
+
 ## Verify
 
 ```

@@ -1,5 +1,6 @@
 import type { ToolDef } from "./registry.ts";
 import { githubRequest, normalizeIssue, repoPath, type RawGitHubIssue } from "../github.ts";
+import { CONTEXT_SCHEMA_PROPERTY, requireContext } from "./args.ts";
 
 /**
  * Patches an existing issue. Every field besides `number` is optional and
@@ -11,10 +12,12 @@ import { githubRequest, normalizeIssue, repoPath, type RawGitHubIssue } from "..
 export const updateIssueTool: ToolDef = {
   name: "update_issue",
   description:
-    "Updates an existing GitHub issue in this repo. Required: number. Optional: title, body " +
-    "(markdown), milestone (its number, e.g. 5 — or null to clear it), labels (array of existing " +
-    "label names — REPLACES the issue's full label set, not an add/remove diff), state " +
-    "('open' or 'closed'). Only fields you provide are changed. Returns the updated issue.",
+    "Updates an existing GitHub issue in this repo. Required: number, context (Git #3538 — a " +
+    "short label identifying which chat/session/build is making this write; rejected before " +
+    "any GitHub call if missing). Optional: title, body (markdown), milestone (its number, " +
+    "e.g. 5 — or null to clear it), labels (array of existing label names — REPLACES the " +
+    "issue's full label set, not an add/remove diff), state ('open' or 'closed'). Only fields " +
+    "you provide are changed. Returns the updated issue.",
   inputSchema: {
     type: "object",
     properties: {
@@ -31,11 +34,13 @@ export const updateIssueTool: ToolDef = {
         description: "Existing label names — replaces the full label set.",
       },
       state: { type: "string", enum: ["open", "closed"] },
+      context: CONTEXT_SCHEMA_PROPERTY,
     },
-    required: ["number"],
+    required: ["number", "context"],
     additionalProperties: false,
   },
   handler: async (args) => {
+    requireContext(args);
     const number = typeof args.number === "number" ? args.number : Number(args.number);
     if (!Number.isInteger(number) || number <= 0) {
       throw new Error("update_issue requires a positive integer `number`");

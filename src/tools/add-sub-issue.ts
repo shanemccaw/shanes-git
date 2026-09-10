@@ -1,6 +1,6 @@
 import type { ToolDef } from "./registry.ts";
 import { addSubIssue } from "../github.ts";
-import { requireInt } from "./args.ts";
+import { CONTEXT_SCHEMA_PROPERTY, requireContext, requireInt } from "./args.ts";
 
 /**
  * add_sub_issue(parent_number, child_number) — Feature #3377's sub-issue hierarchy
@@ -15,17 +15,21 @@ export const addSubIssueTool: ToolDef = {
   description:
     "Adds child_number as a real GitHub sub-issue of parent_number. Resolves the child's internal " +
     "id internally — pass plain issue numbers. Returns the parent's full sub-issue list afterward. " +
-    "Fails with GitHub's own error if the child already has a different parent (remove it there first).",
+    "Fails with GitHub's own error if the child already has a different parent (remove it there " +
+    "first). Required: context (Git #3538 — a short label identifying which chat/session/build " +
+    "is making this write; rejected before any GitHub call if missing).",
   inputSchema: {
     type: "object",
     properties: {
       parent_number: { type: "integer", description: "The issue number to become the parent." },
       child_number: { type: "integer", description: "The issue number to add as a sub-issue." },
+      context: CONTEXT_SCHEMA_PROPERTY,
     },
-    required: ["parent_number", "child_number"],
+    required: ["parent_number", "child_number", "context"],
     additionalProperties: false,
   },
   handler: async (args) => {
+    requireContext(args);
     const parentNumber = requireInt(args.parent_number, "parent_number");
     const childNumber = requireInt(args.child_number, "child_number");
     const subIssues = await addSubIssue(parentNumber, childNumber);

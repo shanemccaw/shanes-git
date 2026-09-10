@@ -1,5 +1,6 @@
 import type { ToolDef } from "./registry.ts";
 import { githubGraphQL, GitHubError } from "../github.ts";
+import { CONTEXT_SCHEMA_PROPERTY, requireContext } from "./args.ts";
 
 /**
  * Shane's real Projects v2 board ("Shane McCaw Consulting"). Same ids already
@@ -95,7 +96,9 @@ export const moveToStatusTool: ToolDef = {
     "Moves a GitHub issue to one of the real Projects v2 board columns: " +
     ALLOWED_STATUSES.map((s) => `"${s}"`).join(", ") +
     ". Adds the issue to the board first if it isn't already an item on it. `status` must be " +
-    "one of the exact strings above — anything else is rejected with the allowed list.",
+    "one of the exact strings above — anything else is rejected with the allowed list. " +
+    "Required: context (Git #3538 — a short label identifying which chat/session/build is " +
+    "making this write; rejected before any GitHub call if missing).",
   inputSchema: {
     type: "object",
     properties: {
@@ -105,11 +108,13 @@ export const moveToStatusTool: ToolDef = {
         enum: ALLOWED_STATUSES,
         description: "The real board column to move it to.",
       },
+      context: CONTEXT_SCHEMA_PROPERTY,
     },
-    required: ["number", "status"],
+    required: ["number", "status", "context"],
     additionalProperties: false,
   },
   handler: async (args) => {
+    requireContext(args);
     const number = args.number;
     const status = args.status;
     if (typeof number !== "number" || !Number.isInteger(number) || number < 1) {

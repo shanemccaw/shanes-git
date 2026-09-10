@@ -1,5 +1,6 @@
 import type { ToolDef } from "./registry.ts";
 import { githubRequest, normalizeIssue, repoPath, type RawGitHubIssue } from "../github.ts";
+import { CONTEXT_SCHEMA_PROPERTY, requireContext } from "./args.ts";
 
 /**
  * Creates a real issue in this repo. `milestone` is the milestone's real
@@ -10,9 +11,11 @@ import { githubRequest, normalizeIssue, repoPath, type RawGitHubIssue } from "..
 export const createIssueTool: ToolDef = {
   name: "create_issue",
   description:
-    "Creates a new GitHub issue in this repo. Required: title. Optional: body (markdown), " +
-    "milestone (the milestone's number, e.g. 5 for v1.1 — not its title), labels (array of " +
-    "existing label names). Returns the created issue's number, url, and full normalized shape.",
+    "Creates a new GitHub issue in this repo. Required: title, context (Git #3538 — a short " +
+    "label identifying which chat/session/build is making this write; rejected before any " +
+    "GitHub call if missing). Optional: body (markdown), milestone (the milestone's number, " +
+    "e.g. 5 for v1.1 — not its title), labels (array of existing label names). Returns the " +
+    "created issue's number, url, and full normalized shape.",
   inputSchema: {
     type: "object",
     properties: {
@@ -24,11 +27,13 @@ export const createIssueTool: ToolDef = {
         items: { type: "string" },
         description: "Existing label names to apply.",
       },
+      context: CONTEXT_SCHEMA_PROPERTY,
     },
-    required: ["title"],
+    required: ["title", "context"],
     additionalProperties: false,
   },
   handler: async (args) => {
+    requireContext(args);
     const title = typeof args.title === "string" ? args.title.trim() : "";
     if (!title) throw new Error("create_issue requires a non-empty `title`");
 
