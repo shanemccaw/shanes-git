@@ -53,9 +53,9 @@ claude mcp add --transport http github-mcp http://127.0.0.1:8770/mcp \
 
 Clients with no header field can use the capability-URL form: `POST /mcp/t/<token>`.
 
-## Tools (scaffold set)
+## Tools
 
-This issue lands only the **foundation**. Three tools prove the auth + PAT + audit spine:
+**Scaffold set (Git #3390)** — three tools prove the auth + PAT + audit spine:
 
 - `server_status` — health; reports `patConfigured` as a boolean only (never the value).
 - `github_whoami` — calls GitHub `GET /user` with the server-side PAT and returns only the
@@ -72,11 +72,24 @@ This issue lands only the **foundation**. Three tools prove the auth + PAT + aud
   later comment may supersede an earlier one's stated state. Both share `postIssueComment()` /
   `listIssueComments()` in `src/github.ts` with `close_issue`'s comment plumbing.
 
+**Sub-issue hierarchy + blocked_by dependencies (Git #3392):**
+
+- `add_sub_issue(parent_number, child_number)` — resolves the child's real internal `id`
+  internally; caller only ever passes issue numbers. Fails with GitHub's own error if the child
+  already has a different parent (GitHub's one-parent-at-a-time rule) — remove it there first.
+- `remove_sub_issue(parent_number, child_number)` — detaches a sub-issue, for re-parenting.
+- `list_sub_issues(number)` — the real, current sub-issue list of one issue.
+- `set_blocked_by(number, blocker_numbers[])` — makes `number`'s real `blocked_by` edges match
+  `blocker_numbers[]` exactly: adds missing edges, removes stale ones no longer in the list (pass
+  `[]` to clear). A true "set", not just an append — the CLAUDE.md Git #1987 rule that a stale
+  edge pointing at a closed/wrong issue silently reads as "clear" is exactly what this reconciles.
+- `list_blocked_by(number)` — real current blockers of `number` + their live GitHub state.
+
 The remaining real GitHub tools — `create_issue`, `get_issue`, `update_issue`, `search_issues`,
-`add_sub_issue`/`remove_sub_issue`/`list_sub_issues`, `set_blocked_by`/`list_blocked_by`, and
-`move_to_status` — are the sibling sub-issues of Feature #3377. Each adds a `ToolDef` file under
-`src/tools/`, appends it to `ALL_TOOLS` in `src/tools/index.ts`, and calls `githubRequest()` from
-`src/github.ts` (the one place the PAT is touched). Nothing else about the server changes.
+and `move_to_status` — are the other sibling sub-issues of Feature #3377. Each adds a `ToolDef`
+file under `src/tools/`, appends it to `ALL_TOOLS` in `src/tools/index.ts`, and calls
+`githubRequest()` (or a `src/github.ts` helper built on it — the one place the PAT is touched).
+Nothing else about the server changes.
 
 ## Verify
 
