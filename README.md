@@ -71,6 +71,19 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
   comment oldest-first (paginates through all pages), matching the standing convention that a
   later comment may supersede an earlier one's stated state. Both share `postIssueComment()` /
   `listIssueComments()` in `src/github.ts` with `close_issue`'s comment plumbing.
+- `move_to_status` (Git #3395) — `move_to_status(number, status)` moves an issue (or epic — an
+  epic is itself an issue) to one of the real Projects v2 board columns this tool is scoped to:
+  `Batter Up`, `Backlog`, `AI Batter Up`, `Ask Shane`, `Done`. Adds the issue to the board first
+  (`addProjectV2ItemById`) if it isn't already a project item, then sets the Status field
+  (`updateProjectV2ItemFieldValue`). `status` is validated against that exact 5-value vocabulary
+  before any GitHub call is made — an unrecognized string is rejected with the real allowed list,
+  never silently coerced. Projects v2 has no REST surface at all, so this is the first tool to use
+  `githubGraphQL()` in `src/github.ts` — same server-side-only-PAT discipline as `githubRequest()`,
+  just against `https://api.github.com/graphql`. Board/field ids
+  (`PVT_kwHOEiBDdc4BeoiY` / `PVTSSF_lAHOEiBDdc4BeoiYzhZBRB0`) and their real option ids are the
+  same ones already live in `artifacts/api-server/src/routes/admin-build-tracker.ts` — re-verify
+  with a read-only `gh api graphql` node lookup if this ever stops moving cards, per that file's
+  own "NOT STABLE ACROSS TIME" note.
 
 **Sub-issue hierarchy + blocked_by dependencies (Git #3392):**
 
@@ -85,10 +98,10 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
   edge pointing at a closed/wrong issue silently reads as "clear" is exactly what this reconciles.
 - `list_blocked_by(number)` — real current blockers of `number` + their live GitHub state.
 
-The remaining real GitHub tools — `create_issue`, `get_issue`, `update_issue`, `search_issues`,
-and `move_to_status` — are the other sibling sub-issues of Feature #3377. Each adds a `ToolDef`
-file under `src/tools/`, appends it to `ALL_TOOLS` in `src/tools/index.ts`, and calls
-`githubRequest()` (or a `src/github.ts` helper built on it — the one place the PAT is touched).
+The remaining real GitHub tools — `create_issue`, `get_issue`, `update_issue`, and
+`search_issues` — are the other sibling sub-issues of Feature #3377. Each adds a `ToolDef` file
+under `src/tools/`, appends it to `ALL_TOOLS` in `src/tools/index.ts`, and calls
+`githubRequest()`/`githubGraphQL()` from `src/github.ts` (the one place the PAT is touched).
 Nothing else about the server changes.
 
 ## Verify

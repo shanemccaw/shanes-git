@@ -111,6 +111,45 @@ function scrub(text: string, pat: string): string {
   return pat ? text.split(pat).join("[redacted-pat]") : text;
 }
 
+const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
+
+/**
+ * The GraphQL twin of githubRequest() — same server-side-only PAT, same
+ * never-log-it discipline. Projects v2 (board columns) has no REST surface at
+ * all; every board read/write goes through this. Throws GitHubError (status 0
+ * for a GraphQL-level error array, since there's no meaningful HTTP status to
+ * attach) with the PAT scrubbed from the message.
+ */
+export async function githubGraphQL<T>(
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<T> {
+  const pat = githubPat();
+  if (!pat) throw new PatNotConfiguredError();
+
+  let res: Response;
+  try {
+    res = await fetch(GITHUB_GRAPHQL_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${pat}`,
+        "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+  } catch (err) {
+    throw new GitHubError(0, "graphql", scrub(err instanceof Error ? err.message : String(err), pat));
+  }
+
+  const body = (await res.json()) as { data?: T; errors?: Array<{ message: string }> };
+  if (!res.ok || body.errors?.length) {
+    const message = body.errors?.map((e) => e.message).join("; ") || res.statusText;
+    throw new GitHubError(res.ok ? 0 : res.status, "graphql", scrub(message, pat));
+  }
+  return body.data as T;
+}
+
 export interface GitHubViewer {
   login: string;
   id: number;
