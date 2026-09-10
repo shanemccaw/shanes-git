@@ -90,6 +90,20 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
   the issue has no project item yet, `status: null` if it's on the board but Status is unset.
   Reuses `move-to-status.ts`'s `githubGraphQL()` call and `PROJECT_V2_ID`; read-only, no
   `context` required.
+- `list_board_column` (Git #3549) — `list_board_column(status, epicNumber?)` is the reverse
+  direction of every tool above: those go issue→project (`issue(number) { projectItems { ... } }`);
+  this one queries the `ProjectV2` node directly (`node(id: PROJECT_V2_ID) { ... on ProjectV2 {
+  items(first: 100, after: $cursor) { ... } } }`) and returns every real item currently sitting in
+  one Status column, paginating through the whole board (`pageInfo.hasNextPage` — not capped at one
+  page). Each matching item's top Epic is resolved in the same query from its nested
+  `parent`/`parent.parent` chain (mirrors #3336's two-level Feature→Epic walk) — whichever `parent`
+  is null one level up is the real top ancestor; an issue with no parent at all is genuinely
+  un-parented (`epicNumber`/`epicTitle`: `null`, not an error). The optional `epicNumber` filters
+  the result to just that Epic's descendants. Returns `{ status, epicNumber, items: [{ number,
+  title, epicNumber, epicTitle }], totalCount }`. Replaces the slow, error-prone workaround #3549
+  found live: a text `search_issues` (GitHub's search doesn't know Projects v2 Status at all)
+  followed by one `get_board_status` call per candidate to confirm which were actually on the
+  column. Read-only, no `context` required.
 
 **Sub-issue hierarchy + blocked_by dependencies (Git #3392):**
 
@@ -131,7 +145,8 @@ change — there was no way to trace which chat did what. Every real write tool 
 `update_issue`, `add_sub_issue`, `remove_sub_issue`, `set_blocked_by`, `post_comment`,
 `close_issue`, `move_to_status` — now requires a `context` string arg. Read-only tools
 (`get_issue`, `search_issues`, `list_sub_issues`, `list_blocked_by`, `list_comments`,
-`get_recent_activity`, `server_status`, `github_whoami`, `get_board_status`) are untouched —
+`get_recent_activity`, `server_status`, `github_whoami`, `get_board_status`,
+`list_board_column`) are untouched —
 nothing to trace on a read.
 
 - **Required, not optional.** A missing or empty `context` is rejected in the handler before any
