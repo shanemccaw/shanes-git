@@ -154,14 +154,61 @@ export interface GitHubIssueSummary {
 export async function postIssueComment(
   issueNumber: number,
   body: string,
-): Promise<{ id: number; htmlUrl: string }> {
+): Promise<{ id: number; htmlUrl: string; createdAt: string }> {
   const { owner, repo } = githubRepo();
-  const { data } = await githubRequest<{ id: number; html_url: string }>(
+  const { data } = await githubRequest<{ id: number; html_url: string; created_at: string }>(
     "POST",
     `/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
     { body },
   );
-  return { id: data.id, htmlUrl: data.html_url };
+  return { id: data.id, htmlUrl: data.html_url, createdAt: data.created_at };
+}
+
+export interface GitHubComment {
+  id: number;
+  htmlUrl: string;
+  createdAt: string;
+  updatedAt: string;
+  author: string | null;
+  body: string;
+}
+
+/**
+ * Lists every comment on an issue/PR, oldest first (GitHub's own default order
+ * for this endpoint), paginating through all pages rather than trusting a
+ * single page for issues with a long history.
+ */
+export async function listIssueComments(issueNumber: number): Promise<GitHubComment[]> {
+  const { owner, repo } = githubRepo();
+  const comments: GitHubComment[] = [];
+  const perPage = 100;
+  for (let page = 1; page < 1000; page++) {
+    const { data } = await githubRequest<
+      Array<{
+        id: number;
+        html_url: string;
+        created_at: string;
+        updated_at: string;
+        user: { login: string } | null;
+        body: string | null;
+      }>
+    >(
+      "GET",
+      `/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=${perPage}&page=${page}&sort=created&direction=asc`,
+    );
+    comments.push(
+      ...data.map((c) => ({
+        id: c.id,
+        htmlUrl: c.html_url,
+        createdAt: c.created_at,
+        updatedAt: c.updated_at,
+        author: c.user?.login ?? null,
+        body: c.body ?? "",
+      })),
+    );
+    if (data.length < perPage) break;
+  }
+  return comments;
 }
 
 /**

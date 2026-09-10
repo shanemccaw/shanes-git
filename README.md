@@ -66,11 +66,15 @@ This issue lands only the **foundation**. Three tools prove the auth + PAT + aud
   is supplied, and that comment posts FIRST, then the issue closes — enforcing the repo's
   standing NOT_PLANNED-always-carries-a-comment rule (Git #2167) in the tool itself rather than
   trusting the caller to remember.
+- `post_comment` / `list_comments` (Git #3393) — `post_comment(number, body)` posts a comment on
+  an issue/PR verbatim, returning its id/htmlUrl/createdAt; `list_comments(number)` lists every
+  comment oldest-first (paginates through all pages), matching the standing convention that a
+  later comment may supersede an earlier one's stated state. Both share `postIssueComment()` /
+  `listIssueComments()` in `src/github.ts` with `close_issue`'s comment plumbing.
 
 The remaining real GitHub tools — `create_issue`, `get_issue`, `update_issue`, `search_issues`,
-`add_sub_issue`/`remove_sub_issue`/`list_sub_issues`, `set_blocked_by`/`list_blocked_by`,
-`post_comment`/`list_comments`, and `move_to_status` — are the sibling sub-issues of Feature
-#3377. Each adds a `ToolDef` file under
+`add_sub_issue`/`remove_sub_issue`/`list_sub_issues`, `set_blocked_by`/`list_blocked_by`, and
+`move_to_status` — are the sibling sub-issues of Feature #3377. Each adds a `ToolDef` file under
 `src/tools/`, appends it to `ALL_TOOLS` in `src/tools/index.ts`, and calls `githubRequest()` from
 `src/github.ts` (the one place the PAT is touched). Nothing else about the server changes.
 
