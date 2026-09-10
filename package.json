@@ -1,0 +1,24 @@
+{
+  "name": "@workspace/github-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GitHub MCP server — server-side PAT, bearer-token auth, no token in chat (Git #3390 / Feature #3377)",
+  "scripts": {
+    "start": "node src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "mint-token": "node bin/mint-token.mjs",
+    "list-tokens": "node bin/list-tokens.mjs",
+    "revoke-token": "node bin/revoke-token.mjs",
+    "smoke": "node scripts/smoke-check.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.20.0",
+    "pino": "^9.14.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/pg": "^8.11.0",
+    "typescript": "~5.9.3"
+  }
+}
