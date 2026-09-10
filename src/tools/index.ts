@@ -2,16 +2,22 @@ import type { ToolDef } from "./registry.ts";
 import { serverStatusTool } from "./server-status.ts";
 import { githubWhoamiTool } from "./github-whoami.ts";
 import { getRecentActivityTool } from "./get-recent-activity.ts";
+import { closeIssueTool } from "./close-issue.ts";
 
 /**
- * Every tool this server exposes. This is the SCAFFOLD set (Git #3390): the
- * three foundational tools that prove the auth + server-side-PAT + audit spine
- * end-to-end. The real GitHub issue/sub-issue/blocked_by/comment/close/board
- * tools are the sibling sub-issues of Feature #3377 — each adds its own ToolDef
- * file here and appends it to this list. Nothing else about the server changes
+ * Every tool this server exposes. The scaffold set (Git #3390) — the three
+ * foundational tools that prove the auth + server-side-PAT + audit spine
+ * end-to-end — plus the real GitHub tools landing as sibling sub-issues of
+ * Feature #3377 (close_issue is Git #3394). Each adds its own ToolDef file
+ * here and appends it to this list. Nothing else about the server changes
  * when a tool is added.
  */
-export const ALL_TOOLS: ToolDef[] = [serverStatusTool, githubWhoamiTool, getRecentActivityTool];
+export const ALL_TOOLS: ToolDef[] = [
+  serverStatusTool,
+  githubWhoamiTool,
+  getRecentActivityTool,
+  closeIssueTool,
+];
 
 export const TOOLS_BY_NAME: Map<string, ToolDef> = new Map(ALL_TOOLS.map((t) => [t.name, t]));
 

@@ -61,11 +61,16 @@ This issue lands only the **foundation**. Three tools prove the auth + PAT + aud
 - `github_whoami` — calls GitHub `GET /user` with the server-side PAT and returns only the
   resulting public identity + token scopes. Proves the credential works without exposing it.
 - `get_recent_activity` — the audit trail of what each connected Claude has done.
+- `close_issue` (Git #3394) — closes an issue with a real `state_reason` (`completed` |
+  `not_planned`). `not_planned` is rejected before any GitHub call unless a non-empty `comment`
+  is supplied, and that comment posts FIRST, then the issue closes — enforcing the repo's
+  standing NOT_PLANNED-always-carries-a-comment rule (Git #2167) in the tool itself rather than
+  trusting the caller to remember.
 
-The real GitHub tools — `create_issue`, `get_issue`, `update_issue`, `search_issues`,
+The remaining real GitHub tools — `create_issue`, `get_issue`, `update_issue`, `search_issues`,
 `add_sub_issue`/`remove_sub_issue`/`list_sub_issues`, `set_blocked_by`/`list_blocked_by`,
-`post_comment`/`list_comments`, `close_issue` (with the enforced NOT_PLANNED comment rule), and
-`move_to_status` — are the sibling sub-issues of Feature #3377. Each adds a `ToolDef` file under
+`post_comment`/`list_comments`, and `move_to_status` — are the sibling sub-issues of Feature
+#3377. Each adds a `ToolDef` file under
 `src/tools/`, appends it to `ALL_TOOLS` in `src/tools/index.ts`, and calls `githubRequest()` from
 `src/github.ts` (the one place the PAT is touched). Nothing else about the server changes.
 

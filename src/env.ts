@@ -72,6 +72,21 @@ export function githubApiBaseUrl(): string {
   return process.env.GITHUB_MCP_API_BASE_URL ?? "https://api.github.com";
 }
 
+/**
+ * The repo this server's issue/PR tools operate against — "owner/repo". Every
+ * real tool in this Feature (#3377) works on this one repo; there is no
+ * multi-repo selection. Overridable via GITHUB_MCP_REPO for a fork/test repo;
+ * defaults to this codebase's own repo.
+ */
+export function githubRepo(): { owner: string; repo: string } {
+  const raw = process.env.GITHUB_MCP_REPO ?? "shanemccaw/Shane-McCaw-MSP";
+  const slash = raw.indexOf("/");
+  if (slash <= 0 || slash === raw.length - 1) {
+    throw new Error(`GITHUB_MCP_REPO must be "owner/repo", got: ${raw}`);
+  }
+  return { owner: raw.slice(0, slash), repo: raw.slice(slash + 1) };
+}
+
 /** Host to bind the HTTP listener to. Loopback by default — this is a local operator tool. */
 export function serverHost(): string {
   return process.env.GITHUB_MCP_HOST ?? "127.0.0.1";

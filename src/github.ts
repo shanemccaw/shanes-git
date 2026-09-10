@@ -1,4 +1,4 @@
-import { githubApiBaseUrl, githubPat } from "./env.ts";
+import { githubApiBaseUrl, githubPat, githubRepo } from "./env.ts";
 
 /**
  * The server-side GitHub client. The PAT is read from the environment
@@ -136,5 +136,56 @@ export async function getViewer(): Promise<GitHubViewer> {
     htmlUrl: data.html_url,
     type: data.type,
     scopes,
+  };
+}
+
+export interface GitHubIssueSummary {
+  number: number;
+  htmlUrl: string;
+  state: string;
+  stateReason: string | null;
+}
+
+/**
+ * Posts a comment on an issue. Returns the comment's own URL so a caller (e.g.
+ * close_issue) can prove the comment landed before the state change that
+ * depends on it.
+ */
+export async function postIssueComment(
+  issueNumber: number,
+  body: string,
+): Promise<{ id: number; htmlUrl: string }> {
+  const { owner, repo } = githubRepo();
+  const { data } = await githubRequest<{ id: number; html_url: string }>(
+    "POST",
+    `/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+    { body },
+  );
+  return { id: data.id, htmlUrl: data.html_url };
+}
+
+/**
+ * Closes an issue with a real state_reason. Callers enforce the NOT_PLANNED
+ * comment rule BEFORE calling this — this function only performs the close.
+ */
+export async function closeIssue(
+  issueNumber: number,
+  stateReason: "completed" | "not_planned",
+): Promise<GitHubIssueSummary> {
+  const { owner, repo } = githubRepo();
+  const { data } = await githubRequest<{
+    number: number;
+    html_url: string;
+    state: string;
+    state_reason: string | null;
+  }>("PATCH", `/repos/${owner}/${repo}/issues/${issueNumber}`, {
+    state: "closed",
+    state_reason: stateReason,
+  });
+  return {
+    number: data.number,
+    htmlUrl: data.html_url,
+    state: data.state,
+    stateReason: data.state_reason,
   };
 }
