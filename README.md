@@ -98,11 +98,24 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
   edge pointing at a closed/wrong issue silently reads as "clear" is exactly what this reconciles.
 - `list_blocked_by(number)` — real current blockers of `number` + their live GitHub state.
 
-The remaining real GitHub tools — `create_issue`, `get_issue`, `update_issue`, and
-`search_issues` — are the other sibling sub-issues of Feature #3377. Each adds a `ToolDef` file
-under `src/tools/`, appends it to `ALL_TOOLS` in `src/tools/index.ts`, and calls
-`githubRequest()`/`githubGraphQL()` from `src/github.ts` (the one place the PAT is touched).
-Nothing else about the server changes.
+**Core issue operations (Git #3391)** — real reads/writes against this repo's issues:
+
+- `create_issue(title, body?, milestone?, labels?)` — `milestone` is the milestone's real
+  *number* (e.g. `5` for "v1.1"), not its title.
+- `get_issue(number)`.
+- `update_issue(number, title?, body?, milestone?, labels?, state?)` — only the fields you pass
+  are changed; `labels`, when passed, replaces the issue's full label set (GitHub's own PATCH
+  semantics), not an add/remove diff.
+- `search_issues(query, perPage?)` — real passthrough to GitHub's own search query syntax
+  (`is:open label:bug`, `milestone:"v1.1"`, free text, …), automatically scoped to this repo with
+  `repo:owner/name`. Same result shape as GitHub's own search API (`total_count` + items).
+
+All four call `githubRequest()` from `src/github.ts` (the one place the PAT is touched) and return
+a normalized issue shape (`normalizeIssue()`) — number, title, body, state, labels, milestone,
+assignees, timestamps, comment count.
+
+With `move_to_status` (Git #3395) landed above, every tool of Feature #3377's original design is
+now shipped.
 
 ## Verify
 

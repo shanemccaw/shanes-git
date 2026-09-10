@@ -178,6 +178,12 @@ export async function getViewer(): Promise<GitHubViewer> {
   };
 }
 
+/** `/repos/{owner}/{repo}` path prefix for the one repo this server talks to. */
+export function repoPath(): string {
+  const { owner, repo } = githubRepo();
+  return `/repos/${owner}/${repo}`;
+}
+
 export interface GitHubIssueSummary {
   number: number;
   htmlUrl: string;
@@ -194,10 +200,9 @@ export async function postIssueComment(
   issueNumber: number,
   body: string,
 ): Promise<{ id: number; htmlUrl: string; createdAt: string }> {
-  const { owner, repo } = githubRepo();
   const { data } = await githubRequest<{ id: number; html_url: string; created_at: string }>(
     "POST",
-    `/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+    `${repoPath()}/issues/${issueNumber}/comments`,
     { body },
   );
   return { id: data.id, htmlUrl: data.html_url, createdAt: data.created_at };
@@ -258,13 +263,12 @@ export async function closeIssue(
   issueNumber: number,
   stateReason: "completed" | "not_planned",
 ): Promise<GitHubIssueSummary> {
-  const { owner, repo } = githubRepo();
   const { data } = await githubRequest<{
     number: number;
     html_url: string;
     state: string;
     state_reason: string | null;
-  }>("PATCH", `/repos/${owner}/${repo}/issues/${issueNumber}`, {
+  }>("PATCH", `${repoPath()}/issues/${issueNumber}`, {
     state: "closed",
     state_reason: stateReason,
   });
@@ -274,12 +278,6 @@ export async function closeIssue(
     state: data.state,
     stateReason: data.state_reason,
   };
-}
-
-/** Builds a `/repos/{owner}/{repo}/...` path against the server's configured repo. */
-function repoPath(path: string): string {
-  const { owner, repo } = githubRepo();
-  return `/repos/${owner}/${repo}${path}`;
 }
 
 export interface IssueSummary {
@@ -302,7 +300,7 @@ export async function getIssueSummary(number: number): Promise<IssueSummary> {
     title: string;
     state: string;
     html_url: string;
-  }>("GET", repoPath(`/issues/${number}`));
+  }>("GET", `${repoPath()}/issues/${number}`);
   return { number: data.number, id: data.id, title: data.title, state: data.state, htmlUrl: data.html_url };
 }
 
@@ -310,7 +308,7 @@ export async function getIssueSummary(number: number): Promise<IssueSummary> {
 export async function listSubIssues(number: number): Promise<IssueSummary[]> {
   const { data } = await githubRequest<
     Array<{ number: number; id: number; title: string; state: string; html_url: string }>
-  >("GET", repoPath(`/issues/${number}/sub_issues`));
+  >("GET", `${repoPath()}/issues/${number}/sub_issues`);
   return data.map((d) => ({ number: d.number, id: d.id, title: d.title, state: d.state, htmlUrl: d.html_url }));
 }
 
@@ -322,14 +320,14 @@ export async function listSubIssues(number: number): Promise<IssueSummary[]> {
  */
 export async function addSubIssue(parentNumber: number, childNumber: number): Promise<IssueSummary[]> {
   const child = await getIssueSummary(childNumber);
-  await githubRequest("POST", repoPath(`/issues/${parentNumber}/sub_issues`), { sub_issue_id: child.id });
+  await githubRequest("POST", `${repoPath()}/issues/${parentNumber}/sub_issues`, { sub_issue_id: child.id });
   return listSubIssues(parentNumber);
 }
 
 /** Removes `childNumber` as a sub-issue of `parentNumber` (for re-parenting). */
 export async function removeSubIssue(parentNumber: number, childNumber: number): Promise<IssueSummary[]> {
   const child = await getIssueSummary(childNumber);
-  await githubRequest("DELETE", repoPath(`/issues/${parentNumber}/sub_issue`), { sub_issue_id: child.id });
+  await githubRequest("DELETE", `${repoPath()}/issues/${parentNumber}/sub_issue`, { sub_issue_id: child.id });
   return listSubIssues(parentNumber);
 }
 
@@ -337,18 +335,76 @@ export async function removeSubIssue(parentNumber: number, childNumber: number):
 export async function listBlockedBy(number: number): Promise<IssueSummary[]> {
   const { data } = await githubRequest<
     Array<{ number: number; id: number; title: string; state: string; html_url: string }>
-  >("GET", repoPath(`/issues/${number}/dependencies/blocked_by`));
+  >("GET", `${repoPath()}/issues/${number}/dependencies/blocked_by`);
   return data.map((d) => ({ number: d.number, id: d.id, title: d.title, state: d.state, htmlUrl: d.html_url }));
 }
 
 /** Adds one real `blocked_by` edge from `number` to `blockerNumber`. */
 export async function addBlockedBy(number: number, blockerNumber: number): Promise<void> {
   const blocker = await getIssueSummary(blockerNumber);
-  await githubRequest("POST", repoPath(`/issues/${number}/dependencies/blocked_by`), { issue_id: blocker.id });
+  await githubRequest("POST", `${repoPath()}/issues/${number}/dependencies/blocked_by`, { issue_id: blocker.id });
 }
 
 /** Removes one real `blocked_by` edge from `number` to `blockerNumber`. */
 export async function removeBlockedBy(number: number, blockerNumber: number): Promise<void> {
   const blocker = await getIssueSummary(blockerNumber);
-  await githubRequest("DELETE", repoPath(`/issues/${number}/dependencies/blocked_by/${blocker.id}`));
+  await githubRequest("DELETE", `${repoPath()}/issues/${number}/dependencies/blocked_by/${blocker.id}`);
+}
+
+/** The raw shape GitHub's REST API returns for an issue (the fields these tools use). */
+export interface RawGitHubIssue {
+  number: number;
+  title: string;
+  body: string | null;
+  state: string;
+  state_reason: string | null;
+  html_url: string;
+  user: { login: string } | null;
+  labels: Array<string | { name?: string }>;
+  milestone: { number: number; title: string } | null;
+  assignees: Array<{ login: string }>;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  comments: number;
+  pull_request?: unknown;
+}
+
+/** The normalized shape every issue tool in this server returns to a chat. */
+export interface NormalizedIssue {
+  number: number;
+  title: string;
+  body: string | null;
+  state: string;
+  stateReason: string | null;
+  htmlUrl: string;
+  author: string | null;
+  labels: string[];
+  milestone: { number: number; title: string } | null;
+  assignees: string[];
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  commentCount: number;
+  isPullRequest: boolean;
+}
+
+export function normalizeIssue(raw: RawGitHubIssue): NormalizedIssue {
+  return {
+    number: raw.number,
+    title: raw.title,
+    body: raw.body,
+    state: raw.state,
+    stateReason: raw.state_reason,
+    htmlUrl: raw.html_url,
+    author: raw.user?.login ?? null,
+    labels: raw.labels.map((l) => (typeof l === "string" ? l : (l.name ?? ""))).filter(Boolean),
+    milestone: raw.milestone ? { number: raw.milestone.number, title: raw.milestone.title } : null,
+    assignees: raw.assignees.map((a) => a.login),
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+    closedAt: raw.closed_at,
+    commentCount: raw.comments,
+    isPullRequest: raw.pull_request !== undefined,
+  };
 }
