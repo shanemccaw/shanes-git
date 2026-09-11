@@ -1,6 +1,7 @@
 import type { ToolDef } from "./registry.ts";
 import { githubGraphQL, GitHubError } from "../github.ts";
-import { CONTEXT_SCHEMA_PROPERTY, requireContext } from "./args.ts";
+import { resolveRepo } from "../env.ts";
+import { CONTEXT_SCHEMA_PROPERTY, REPO_SCHEMA_PROPERTY, requireContext } from "./args.ts";
 
 /**
  * Shane's real Projects v2 board ("Shane McCaw Consulting"). Same ids already
@@ -76,9 +77,6 @@ interface IssueNodeAndProjectItemResult {
   };
 }
 
-const OWNER = "shanemccaw";
-const REPO = "Shane-McCaw-MSP";
-
 /**
  * `move_to_status(number, status)` — Git #3395. Moves a real issue (or epic;
  * an epic is itself a GitHub issue) to one of the five real board columns this
@@ -98,7 +96,9 @@ export const moveToStatusTool: ToolDef = {
     ". Adds the issue to the board first if it isn't already an item on it. `status` must be " +
     "one of the exact strings above — anything else is rejected with the allowed list. " +
     "Required: context (Git #3538 — a short label identifying which chat/session/build is " +
-    "making this write; rejected before any GitHub call if missing).",
+    "making this write; rejected before any GitHub call if missing). Optional `repo` (Git " +
+    "#3580) targets a different repo for the issue lookup — the board itself (PROJECT_V2_ID) " +
+    "is one shared board and does not vary by repo; defaults to the server's configured repo.",
   inputSchema: {
     type: "object",
     properties: {
@@ -108,6 +108,7 @@ export const moveToStatusTool: ToolDef = {
         enum: ALLOWED_STATUSES,
         description: "The real board column to move it to.",
       },
+      repo: REPO_SCHEMA_PROPERTY,
       context: CONTEXT_SCHEMA_PROPERTY,
     },
     required: ["number", "status", "context"],
@@ -126,10 +127,11 @@ export const moveToStatusTool: ToolDef = {
       );
     }
     const optionId = STATUS_OPTION_ID[status];
+    const { owner, repo } = resolveRepo(args.repo);
 
     const data = await githubGraphQL<IssueNodeAndProjectItemResult>(ISSUE_NODE_AND_PROJECT_ITEM_QUERY, {
-      owner: OWNER,
-      repo: REPO,
+      owner,
+      repo,
       number,
     });
     const issue = data.repository.issue;

@@ -1,5 +1,7 @@
 import type { ToolDef } from "./registry.ts";
 import { githubGraphQL, GitHubError } from "../github.ts";
+import { resolveRepo } from "../env.ts";
+import { REPO_SCHEMA_PROPERTY } from "./args.ts";
 
 /**
  * Shane's real Projects v2 board ("Shane McCaw Consulting"). Same id already
@@ -43,9 +45,6 @@ interface IssueBoardStatusResult {
   };
 }
 
-const OWNER = "shanemccaw";
-const REPO = "Shane-McCaw-MSP";
-
 /**
  * `get_board_status(number)` — Git #3542. Read counterpart to `move_to_status`
  * (Git #3395): reads a real issue's current Projects v2 board column without
@@ -67,11 +66,14 @@ export const getBoardStatusTool: ToolDef = {
     "Reads a GitHub issue's real current Projects v2 board column (the Status field) without " +
     "changing anything — the read counterpart to move_to_status. Returns " +
     "{ number, onBoard, status }: onBoard is false (not an error) if the issue isn't on the " +
-    "board yet; status is null if it's on the board but Status is unset.",
+    "board yet; status is null if it's on the board but Status is unset. Optional `repo` (Git " +
+    "#3580) targets a different repo for the issue lookup — the board itself (PROJECT_V2_ID) " +
+    "is one shared board and does not vary by repo; defaults to the server's configured repo.",
   inputSchema: {
     type: "object",
     properties: {
       number: { type: "integer", minimum: 1, description: "The GitHub issue number to check." },
+      repo: REPO_SCHEMA_PROPERTY,
     },
     required: ["number"],
     additionalProperties: false,
@@ -81,10 +83,11 @@ export const getBoardStatusTool: ToolDef = {
     if (typeof number !== "number" || !Number.isInteger(number) || number < 1) {
       throw new Error(`"number" must be a positive integer GitHub issue number, got: ${JSON.stringify(number)}`);
     }
+    const { owner, repo } = resolveRepo(args.repo);
 
     const data = await githubGraphQL<IssueBoardStatusResult>(ISSUE_BOARD_STATUS_QUERY, {
-      owner: OWNER,
-      repo: REPO,
+      owner,
+      repo,
       number,
     });
     const issue = data.repository.issue;

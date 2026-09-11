@@ -1,6 +1,7 @@
 import type { ToolDef } from "./registry.ts";
 import { githubRequest, normalizeIssue, repoPath, type RawGitHubIssue } from "../github.ts";
-import { CONTEXT_SCHEMA_PROPERTY, requireContext } from "./args.ts";
+import { resolveRepo } from "../env.ts";
+import { CONTEXT_SCHEMA_PROPERTY, REPO_SCHEMA_PROPERTY, requireContext } from "./args.ts";
 
 /**
  * Creates a real issue in this repo. `milestone` is the milestone's real
@@ -11,11 +12,12 @@ import { CONTEXT_SCHEMA_PROPERTY, requireContext } from "./args.ts";
 export const createIssueTool: ToolDef = {
   name: "create_issue",
   description:
-    "Creates a new GitHub issue in this repo. Required: title, context (Git #3538 — a short " +
-    "label identifying which chat/session/build is making this write; rejected before any " +
-    "GitHub call if missing). Optional: body (markdown), milestone (the milestone's number, " +
-    "e.g. 5 for v1.1 — not its title), labels (array of existing label names). Returns the " +
-    "created issue's number, url, and full normalized shape.",
+    "Creates a new GitHub issue. Required: title, context (Git #3538 — a short label " +
+    "identifying which chat/session/build is making this write; rejected before any GitHub " +
+    "call if missing). Optional: body (markdown), milestone (the milestone's number, e.g. 5 " +
+    "for v1.1 — not its title), labels (array of existing label names), repo (Git #3580 — " +
+    "targets a different repo; defaults to the server's configured repo). Returns the created " +
+    "issue's number, url, and full normalized shape.",
   inputSchema: {
     type: "object",
     properties: {
@@ -27,6 +29,7 @@ export const createIssueTool: ToolDef = {
         items: { type: "string" },
         description: "Existing label names to apply.",
       },
+      repo: REPO_SCHEMA_PROPERTY,
       context: CONTEXT_SCHEMA_PROPERTY,
     },
     required: ["title", "context"],
@@ -36,6 +39,7 @@ export const createIssueTool: ToolDef = {
     requireContext(args);
     const title = typeof args.title === "string" ? args.title.trim() : "";
     if (!title) throw new Error("create_issue requires a non-empty `title`");
+    const repo = resolveRepo(args.repo);
 
     const body: Record<string, unknown> = { title };
     if (typeof args.body === "string") body.body = args.body;
@@ -45,7 +49,7 @@ export const createIssueTool: ToolDef = {
       if (labels.length) body.labels = labels;
     }
 
-    const { data } = await githubRequest<RawGitHubIssue>("POST", `${repoPath()}/issues`, body);
+    const { data } = await githubRequest<RawGitHubIssue>("POST", `${repoPath(repo)}/issues`, body);
     return normalizeIssue(data);
   },
 };

@@ -45,6 +45,22 @@ export function requireContext(args: Record<string, unknown>): string {
 }
 
 /**
+ * The shared `repo` JSON-Schema fragment every repo-scoped tool exposes —
+ * Git #3580 (Feature #3378: Multi-Repo Support). Optional; resolved via
+ * `resolveRepo()` in env.ts, which falls back to GITHUB_MCP_REPO/the
+ * codebase default when omitted, so every existing call keeps working
+ * unchanged.
+ */
+export const REPO_SCHEMA_PROPERTY = {
+  type: "string",
+  description:
+    "Optional. Which repo this call targets, \"owner/repo\" shape (e.g. " +
+    '"shanemccaw/Shane-McCaw-MSP"). Defaults to the server\'s configured GITHUB_MCP_REPO ' +
+    "(currently shanemccaw/Shane-McCaw-MSP) when omitted — every existing call keeps working " +
+    "unchanged. Rejected before any GitHub call if malformed.",
+} as const;
+
+/**
  * Prefixes a real GitHub comment body with a visible `[chat: <context>]` tag
  * so the trail is readable directly on GitHub, not just in the local audit
  * log (Git #3538, item 4). Applied only where a tool writes a real comment

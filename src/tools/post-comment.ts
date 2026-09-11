@@ -1,6 +1,7 @@
 import type { ToolDef } from "./registry.ts";
 import { postIssueComment } from "../github.ts";
-import { CONTEXT_SCHEMA_PROPERTY, requireContext, tagCommentWithContext } from "./args.ts";
+import { resolveRepo } from "../env.ts";
+import { CONTEXT_SCHEMA_PROPERTY, REPO_SCHEMA_PROPERTY, requireContext, tagCommentWithContext } from "./args.ts";
 
 /**
  * Posts a real comment on a real issue — this is the mechanism the standing
@@ -30,17 +31,19 @@ import { CONTEXT_SCHEMA_PROPERTY, requireContext, tagCommentWithContext } from "
 export const postCommentTool: ToolDef = {
   name: "post_comment",
   description:
-    "Posts a comment on a GitHub issue (or PR — same numbering) in the repo this server is " +
-    "configured for. Returns the created comment's id, htmlUrl, and createdAt. Required: number, " +
-    "body, context (Git #3538 — a short label identifying which chat/session/build is making " +
-    "this write; rejected before any GitHub call if missing). The posted comment body is " +
-    "prefixed with a visible `[chat: <context>]` tag so the trail is readable directly on " +
-    "GitHub, not just in the local audit log.",
+    "Posts a comment on a GitHub issue (or PR — same numbering). Returns the created comment's " +
+    "id, htmlUrl, and createdAt. Required: number, body, context (Git #3538 — a short label " +
+    "identifying which chat/session/build is making this write; rejected before any GitHub " +
+    "call if missing). Optional `repo` (Git #3580) targets a different repo; defaults to the " +
+    "server's configured repo. The posted comment body is prefixed with a visible " +
+    "`[chat: <context>]` tag so the trail is readable directly on GitHub, not just in the " +
+    "local audit log.",
   inputSchema: {
     type: "object",
     properties: {
       number: { type: "number", description: "The issue or PR number." },
       body: { type: "string", description: "The comment body (Markdown)." },
+      repo: REPO_SCHEMA_PROPERTY,
       context: CONTEXT_SCHEMA_PROPERTY,
     },
     required: ["number", "body", "context"],
@@ -50,8 +53,9 @@ export const postCommentTool: ToolDef = {
     const context = requireContext(args);
     const number = requireNumber(args, "number");
     const body = requireString(args, "body");
+    const repo = resolveRepo(args.repo);
 
-    const comment = await postIssueComment(number, tagCommentWithContext(context, body));
+    const comment = await postIssueComment(number, tagCommentWithContext(context, body), repo);
 
     return { ...comment, number };
   },

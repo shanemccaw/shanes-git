@@ -1,6 +1,7 @@
 import type { ToolDef } from "./registry.ts";
-import { githubRepo } from "../env.ts";
+import { resolveRepo } from "../env.ts";
 import { githubRequest, normalizeIssue, type RawGitHubIssue } from "../github.ts";
+import { REPO_SCHEMA_PROPERTY } from "./args.ts";
 
 interface SearchResponse {
   total_count: number;
@@ -18,15 +19,16 @@ interface SearchResponse {
 export const searchIssuesTool: ToolDef = {
   name: "search_issues",
   description:
-    "Searches issues and PRs in this repo using GitHub's own search query syntax " +
-    "(e.g. 'is:open label:bug', 'milestone:\"v1.1\" is:issue', free text). The repo is scoped " +
-    "in automatically. Returns total_count and the matching issues (normalized), same shape as " +
-    "GitHub's own search.",
+    "Searches issues and PRs using GitHub's own search query syntax (e.g. 'is:open label:bug', " +
+    "'milestone:\"v1.1\" is:issue', free text). The repo is scoped in automatically. Optional " +
+    "`repo` (Git #3580) targets a different repo; defaults to the server's configured repo. " +
+    "Returns total_count and the matching issues (normalized), same shape as GitHub's own search.",
   inputSchema: {
     type: "object",
     properties: {
       query: { type: "string", description: "A real GitHub search query, e.g. 'is:open label:bug'." },
       perPage: { type: "integer", minimum: 1, maximum: 100, description: "Results per page (default 30, max 100)." },
+      repo: REPO_SCHEMA_PROPERTY,
     },
     required: ["query"],
     additionalProperties: false,
@@ -36,7 +38,7 @@ export const searchIssuesTool: ToolDef = {
     if (!rawQuery) throw new Error("search_issues requires a non-empty `query`");
 
     const perPage = typeof args.perPage === "number" ? Math.min(Math.max(Math.trunc(args.perPage), 1), 100) : 30;
-    const { owner, repo } = githubRepo();
+    const { owner, repo } = resolveRepo(args.repo);
     const scopedQuery = `repo:${owner}/${repo} ${rawQuery}`;
     const params = new URLSearchParams({ q: scopedQuery, per_page: String(perPage) });
 

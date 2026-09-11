@@ -61,17 +61,18 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
 - `github_whoami` — calls GitHub `GET /user` with the server-side PAT and returns only the
   resulting public identity + token scopes. Proves the credential works without exposing it.
 - `get_recent_activity` — the audit trail of what each connected Claude has done.
-- `close_issue` (Git #3394) — closes an issue with a real `state_reason` (`completed` |
-  `not_planned`). `not_planned` is rejected before any GitHub call unless a non-empty `comment`
-  is supplied, and that comment posts FIRST, then the issue closes — enforcing the repo's
-  standing NOT_PLANNED-always-carries-a-comment rule (Git #2167) in the tool itself rather than
-  trusting the caller to remember.
-- `post_comment` / `list_comments` (Git #3393) — `post_comment(number, body)` posts a comment on
-  an issue/PR verbatim, returning its id/htmlUrl/createdAt; `list_comments(number)` lists every
-  comment oldest-first (paginates through all pages), matching the standing convention that a
-  later comment may supersede an earlier one's stated state. Both share `postIssueComment()` /
-  `listIssueComments()` in `src/github.ts` with `close_issue`'s comment plumbing.
-- `move_to_status` (Git #3395) — `move_to_status(number, status)` moves an issue (or epic — an
+- `close_issue` (Git #3394) — `close_issue(number, state_reason, comment?, repo?)` closes an issue
+  with a real `state_reason` (`completed` | `not_planned`). `not_planned` is rejected before any
+  GitHub call unless a non-empty `comment` is supplied, and that comment posts FIRST, then the
+  issue closes — enforcing the repo's standing NOT_PLANNED-always-carries-a-comment rule (Git
+  #2167) in the tool itself rather than trusting the caller to remember.
+- `post_comment` / `list_comments` (Git #3393) — `post_comment(number, body, repo?)` posts a
+  comment on an issue/PR verbatim, returning its id/htmlUrl/createdAt; `list_comments(number,
+  repo?)` lists every comment oldest-first (paginates through all pages), matching the standing
+  convention that a later comment may supersede an earlier one's stated state. Both share
+  `postIssueComment()` / `listIssueComments()` in `src/github.ts` with `close_issue`'s comment
+  plumbing.
+- `move_to_status` (Git #3395) — `move_to_status(number, status, repo?)` moves an issue (or epic — an
   epic is itself an issue) to one of the real Projects v2 board columns this tool is scoped to:
   `Batter Up`, `Backlog`, `AI Batter Up`, `Ask Shane`, `Done`. Adds the issue to the board first
   (`addProjectV2ItemById`) if it isn't already a project item, then sets the Status field
@@ -84,7 +85,7 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
   same ones already live in `artifacts/api-server/src/routes/admin-build-tracker.ts` — re-verify
   with a read-only `gh api graphql` node lookup if this ever stops moving cards, per that file's
   own "NOT STABLE ACROSS TIME" note.
-- `get_board_status` (Git #3542) — `get_board_status(number)` is the read counterpart
+- `get_board_status` (Git #3542) — `get_board_status(number, repo?)` is the read counterpart
   `move_to_status` had none of: reads an issue's real current Projects v2 Status column without
   changing anything. Returns `{ number, onBoard, status }` — `onBoard: false` (not an error) if
   the issue has no project item yet, `status: null` if it's on the board but Status is unset.
@@ -107,28 +108,29 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
 
 **Sub-issue hierarchy + blocked_by dependencies (Git #3392):**
 
-- `add_sub_issue(parent_number, child_number)` — resolves the child's real internal `id`
+- `add_sub_issue(parent_number, child_number, repo?)` — resolves the child's real internal `id`
   internally; caller only ever passes issue numbers. Fails with GitHub's own error if the child
   already has a different parent (GitHub's one-parent-at-a-time rule) — remove it there first.
-- `remove_sub_issue(parent_number, child_number)` — detaches a sub-issue, for re-parenting.
-- `list_sub_issues(number)` — the real, current sub-issue list of one issue.
-- `set_blocked_by(number, blocker_numbers[])` — makes `number`'s real `blocked_by` edges match
-  `blocker_numbers[]` exactly: adds missing edges, removes stale ones no longer in the list (pass
-  `[]` to clear). A true "set", not just an append — the CLAUDE.md Git #1987 rule that a stale
-  edge pointing at a closed/wrong issue silently reads as "clear" is exactly what this reconciles.
-- `list_blocked_by(number)` — real current blockers of `number` + their live GitHub state.
+- `remove_sub_issue(parent_number, child_number, repo?)` — detaches a sub-issue, for re-parenting.
+- `list_sub_issues(number, repo?)` — the real, current sub-issue list of one issue.
+- `set_blocked_by(number, blocker_numbers[], repo?)` — makes `number`'s real `blocked_by` edges
+  match `blocker_numbers[]` exactly: adds missing edges, removes stale ones no longer in the list
+  (pass `[]` to clear). A true "set", not just an append — the CLAUDE.md Git #1987 rule that a
+  stale edge pointing at a closed/wrong issue silently reads as "clear" is exactly what this
+  reconciles.
+- `list_blocked_by(number, repo?)` — real current blockers of `number` + their live GitHub state.
 
-**Core issue operations (Git #3391)** — real reads/writes against this repo's issues:
+**Core issue operations (Git #3391)** — real reads/writes against issues:
 
-- `create_issue(title, body?, milestone?, labels?)` — `milestone` is the milestone's real
+- `create_issue(title, body?, milestone?, labels?, repo?)` — `milestone` is the milestone's real
   *number* (e.g. `5` for "v1.1"), not its title.
-- `get_issue(number)`.
-- `update_issue(number, title?, body?, milestone?, labels?, state?)` — only the fields you pass
-  are changed; `labels`, when passed, replaces the issue's full label set (GitHub's own PATCH
+- `get_issue(number, repo?)`.
+- `update_issue(number, title?, body?, milestone?, labels?, state?, repo?)` — only the fields you
+  pass are changed; `labels`, when passed, replaces the issue's full label set (GitHub's own PATCH
   semantics), not an add/remove diff.
-- `search_issues(query, perPage?)` — real passthrough to GitHub's own search query syntax
-  (`is:open label:bug`, `milestone:"v1.1"`, free text, …), automatically scoped to this repo with
-  `repo:owner/name`. Same result shape as GitHub's own search API (`total_count` + items).
+- `search_issues(query, perPage?, repo?)` — real passthrough to GitHub's own search query syntax
+  (`is:open label:bug`, `milestone:"v1.1"`, free text, …), automatically scoped to the target repo
+  with `repo:owner/name`. Same result shape as GitHub's own search API (`total_count` + items).
 
 All four call `githubRequest()` from `src/github.ts` (the one place the PAT is touched) and return
 a normalized issue shape (`normalizeIssue()`) — number, title, body, state, labels, milestone,
@@ -136,6 +138,41 @@ assignees, timestamps, comment count.
 
 With `move_to_status` (Git #3395) landed above, every tool of Feature #3377's original design is
 now shipped.
+
+## Multi-repo `repo` parameter (Git #3580, Feature #3378)
+
+Every tool above that actually looks up or writes an issue in a specific repo — `create_issue`,
+`get_issue`, `update_issue`, `search_issues`, `close_issue`, `post_comment`, `list_comments`,
+`add_sub_issue`, `remove_sub_issue`, `list_sub_issues`, `set_blocked_by`, `list_blocked_by`,
+`move_to_status`, `get_board_status` — now accepts an **optional** `repo` argument, `"owner/repo"`
+shape (e.g. `"shanemccaw/some-other-repo"`).
+
+- **Omitted or empty → full backward compatibility.** Every existing call site keeps resolving to
+  exactly what it did before this: the `GITHUB_MCP_REPO` env var, defaulting to
+  `shanemccaw/Shane-McCaw-MSP`. `src/env.ts`'s `resolveRepo(repoArg)` is the one shared resolver
+  every tool calls.
+- **Malformed `repo` is rejected before any GitHub call** — same `"must be owner/repo, got: ..."`
+  validation `githubRepo()`'s own env-var parsing already used, now shared via
+  `parseOwnerRepo()`/`resolveRepo()`.
+- **`add_sub_issue`/`remove_sub_issue`/`set_blocked_by` apply `repo` to every issue number they
+  touch** (parent + child, or `number` + every blocker) — a single call targets one repo, not a
+  cross-repo pairing.
+- **The Projects v2 board itself does not vary by `repo`.** `move_to_status` and
+  `get_board_status` use `repo` only to resolve *which repo's issue* to look up
+  (`repository(owner: $owner, name: $repo) { issue(number: $number) { ... } }`); `PROJECT_V2_ID`
+  and `PROJECT_V2_STATUS_FIELD_ID` stay the single shared constants they already were — this is
+  the real one-shared-board design the issue's own body calls out.
+- **`list_board_column` deliberately does NOT get a `repo` param.** It queries the `ProjectV2` node
+  directly (`node(id: PROJECT_V2_ID) { ... }`), with no owner/repo issue lookup anywhere in its
+  query — there is no per-call repo dimension to thread through it. Adding a `repo` argument that
+  the handler never consults would be a fake, no-op parameter.
+- **`server_status`, `github_whoami`, `get_recent_activity` also have no `repo` param**, for the
+  same reason — none of them address a specific repo at all.
+- **Real verification (2026-09-10):** `get_issue({ number: 3580 })` with no `repo` returned
+  `shanemccaw/Shane-McCaw-MSP#3580` unchanged; the same call with `repo: "octocat/Hello-World"`
+  returned that genuinely different public repo's real issue #1 — the connector's classic
+  `GITHUB_MCP_PAT` isn't restricted to one repo, so this works today. A malformed `repo` string
+  (`"not-a-valid-repo-string"`) was rejected pre-flight before any GitHub call fired.
 
 ## Required `context` on every write (Git #3538)
 

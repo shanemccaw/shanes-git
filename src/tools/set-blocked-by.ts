@@ -1,6 +1,7 @@
 import type { ToolDef } from "./registry.ts";
 import { addBlockedBy, listBlockedBy, removeBlockedBy } from "../github.ts";
-import { CONTEXT_SCHEMA_PROPERTY, requireContext, requireInt, requireIntArray } from "./args.ts";
+import { resolveRepo } from "../env.ts";
+import { CONTEXT_SCHEMA_PROPERTY, REPO_SCHEMA_PROPERTY, requireContext, requireInt, requireIntArray } from "./args.ts";
 
 /**
  * set_blocked_by(number, blocker_numbers[]) — makes `number`'s real blocked_by
@@ -17,7 +18,9 @@ export const setBlockedByTool: ToolDef = {
     "Sets number's real blocked_by dependency edges to exactly blocker_numbers[] — adds any missing " +
     "edge and removes any existing edge not in the list (pass [] to clear all blockers). Returns the " +
     "resulting real blocked_by list. Required: context (Git #3538 — a short label identifying " +
-    "which chat/session/build is making this write; rejected before any GitHub call if missing).",
+    "which chat/session/build is making this write; rejected before any GitHub call if missing). " +
+    "Optional `repo` (Git #3580) targets a different repo (applied to `number` and every blocker); " +
+    "defaults to the server's configured repo.",
   inputSchema: {
     type: "object",
     properties: {
@@ -27,6 +30,7 @@ export const setBlockedByTool: ToolDef = {
         items: { type: "integer" },
         description: "The exact set of issue numbers that should block `number`.",
       },
+      repo: REPO_SCHEMA_PROPERTY,
       context: CONTEXT_SCHEMA_PROPERTY,
     },
     required: ["number", "blocker_numbers", "context"],
@@ -37,21 +41,22 @@ export const setBlockedByTool: ToolDef = {
     const number = requireInt(args.number, "number");
     const desired = requireIntArray(args.blocker_numbers, "blocker_numbers");
     const desiredSet = new Set(desired);
+    const repo = resolveRepo(args.repo);
 
-    const current = await listBlockedBy(number);
+    const current = await listBlockedBy(number, repo);
     const currentNumbers = new Set(current.map((c) => c.number));
 
     const toAdd = desired.filter((n) => !currentNumbers.has(n));
     const toRemove = current.filter((c) => !desiredSet.has(c.number));
 
     for (const blockerNumber of toAdd) {
-      await addBlockedBy(number, blockerNumber);
+      await addBlockedBy(number, blockerNumber, repo);
     }
     for (const stale of toRemove) {
-      await removeBlockedBy(number, stale.number);
+      await removeBlockedBy(number, stale.number, repo);
     }
 
-    const blockedBy = await listBlockedBy(number);
+    const blockedBy = await listBlockedBy(number, repo);
     return { number, added: toAdd, removed: toRemove.map((r) => r.number), blockedBy };
   },
 };

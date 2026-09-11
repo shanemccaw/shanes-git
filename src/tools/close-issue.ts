@@ -1,6 +1,7 @@
 import type { ToolDef } from "./registry.ts";
 import { closeIssue, postIssueComment } from "../github.ts";
-import { CONTEXT_SCHEMA_PROPERTY, requireContext, tagCommentWithContext } from "./args.ts";
+import { resolveRepo } from "../env.ts";
+import { CONTEXT_SCHEMA_PROPERTY, REPO_SCHEMA_PROPERTY, requireContext, tagCommentWithContext } from "./args.ts";
 
 /**
  * Enforces the repo's own standing rule (CLAUDE.md: "A NOT_PLANNED closure
@@ -20,8 +21,9 @@ export const closeIssueTool: ToolDef = {
     "posted on the issue BEFORE it closes. Never closes an issue itself; this repo's issues are " +
     "closed only by Shane's own decision or an explicit instruction to close on his behalf. " +
     "Required: context (Git #3538 — a short label identifying which chat/session/build is " +
-    "making this write; rejected before any GitHub call if missing). When a `comment` is posted, " +
-    "it's prefixed with a visible `[chat: <context>]` tag.",
+    "making this write; rejected before any GitHub call if missing). Optional `repo` (Git " +
+    "#3580) targets a different repo; defaults to the server's configured repo. When a " +
+    "`comment` is posted, it's prefixed with a visible `[chat: <context>]` tag.",
   inputSchema: {
     type: "object",
     properties: {
@@ -37,6 +39,7 @@ export const closeIssueTool: ToolDef = {
           "Required and must be non-empty when state_reason is not_planned — the real " +
           "explanation of what changed / what supersedes it. Optional for completed.",
       },
+      repo: REPO_SCHEMA_PROPERTY,
       context: CONTEXT_SCHEMA_PROPERTY,
     },
     required: ["number", "state_reason", "context"],
@@ -44,6 +47,7 @@ export const closeIssueTool: ToolDef = {
   },
   handler: async (args) => {
     const context = requireContext(args);
+    const repo = resolveRepo(args.repo);
     const number = args.number;
     const stateReason = args.state_reason;
     if (typeof number !== "number" || !Number.isInteger(number) || number < 1) {
@@ -67,10 +71,10 @@ export const closeIssueTool: ToolDef = {
     if (rawComment.length > 0) {
       // Comment posts FIRST — if this throws, the issue is never closed, so a
       // failed comment can never silently leave a commentless NOT_PLANNED close.
-      postedComment = await postIssueComment(number, tagCommentWithContext(context, rawComment));
+      postedComment = await postIssueComment(number, tagCommentWithContext(context, rawComment), repo);
     }
 
-    const closed = await closeIssue(number, stateReason);
+    const closed = await closeIssue(number, stateReason, repo);
 
     return {
       number: closed.number,

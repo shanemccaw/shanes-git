@@ -72,19 +72,39 @@ export function githubApiBaseUrl(): string {
   return process.env.GITHUB_MCP_API_BASE_URL ?? "https://api.github.com";
 }
 
+/** Parses an "owner/repo" string, throwing with `label` in the message if it's malformed. */
+function parseOwnerRepo(raw: string, label: string): { owner: string; repo: string } {
+  const slash = raw.indexOf("/");
+  if (slash <= 0 || slash === raw.length - 1) {
+    throw new Error(`${label} must be "owner/repo", got: ${raw}`);
+  }
+  return { owner: raw.slice(0, slash), repo: raw.slice(slash + 1) };
+}
+
 /**
- * The repo this server's issue/PR tools operate against — "owner/repo". Every
- * real tool in this Feature (#3377) works on this one repo; there is no
- * multi-repo selection. Overridable via GITHUB_MCP_REPO for a fork/test repo;
- * defaults to this codebase's own repo.
+ * The repo this server's tools operate against by default — "owner/repo".
+ * Overridable via GITHUB_MCP_REPO for a fork/test repo; defaults to this
+ * codebase's own repo. As of Git #3580, this is the *fallback* a tool call
+ * resolves to when it doesn't supply its own `repo` argument — see
+ * `resolveRepo()` — not the only repo the server can ever address.
  */
 export function githubRepo(): { owner: string; repo: string } {
   const raw = process.env.GITHUB_MCP_REPO ?? "shanemccaw/Shane-McCaw-MSP";
-  const slash = raw.indexOf("/");
-  if (slash <= 0 || slash === raw.length - 1) {
-    throw new Error(`GITHUB_MCP_REPO must be "owner/repo", got: ${raw}`);
-  }
-  return { owner: raw.slice(0, slash), repo: raw.slice(slash + 1) };
+  return parseOwnerRepo(raw, "GITHUB_MCP_REPO");
+}
+
+/**
+ * Resolves the real repo one tool call should operate against (Git #3580) —
+ * the caller-supplied `repo` tool argument ("owner/repo") if present and
+ * non-empty, else the existing GITHUB_MCP_REPO/default fallback. Validates
+ * the "owner/repo" shape and rejects a malformed value BEFORE any GitHub call
+ * is made, same discipline `githubRepo()`'s own env-var validation already
+ * uses. An omitted/empty `repo` arg is full backward compatibility — every
+ * existing call site keeps resolving to exactly what it did before this.
+ */
+export function resolveRepo(repoArg: unknown): { owner: string; repo: string } {
+  if (typeof repoArg !== "string" || !repoArg.trim()) return githubRepo();
+  return parseOwnerRepo(repoArg.trim(), "repo");
 }
 
 /** Host to bind the HTTP listener to. Loopback by default — this is a local operator tool. */

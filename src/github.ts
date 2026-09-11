@@ -178,9 +178,13 @@ export async function getViewer(): Promise<GitHubViewer> {
   };
 }
 
-/** `/repos/{owner}/{repo}` path prefix for the one repo this server talks to. */
-export function repoPath(): string {
-  const { owner, repo } = githubRepo();
+/**
+ * `/repos/{owner}/{repo}` path prefix. `override` (Git #3580) lets a caller
+ * target a specific repo for this one call; omitted falls back to the
+ * existing GITHUB_MCP_REPO/default via `githubRepo()`.
+ */
+export function repoPath(override?: { owner: string; repo: string }): string {
+  const { owner, repo } = override ?? githubRepo();
   return `/repos/${owner}/${repo}`;
 }
 
@@ -199,10 +203,11 @@ export interface GitHubIssueSummary {
 export async function postIssueComment(
   issueNumber: number,
   body: string,
+  repo?: { owner: string; repo: string },
 ): Promise<{ id: number; htmlUrl: string; createdAt: string }> {
   const { data } = await githubRequest<{ id: number; html_url: string; created_at: string }>(
     "POST",
-    `${repoPath()}/issues/${issueNumber}/comments`,
+    `${repoPath(repo)}/issues/${issueNumber}/comments`,
     { body },
   );
   return { id: data.id, htmlUrl: data.html_url, createdAt: data.created_at };
@@ -222,8 +227,11 @@ export interface GitHubComment {
  * for this endpoint), paginating through all pages rather than trusting a
  * single page for issues with a long history.
  */
-export async function listIssueComments(issueNumber: number): Promise<GitHubComment[]> {
-  const { owner, repo } = githubRepo();
+export async function listIssueComments(
+  issueNumber: number,
+  repoOverride?: { owner: string; repo: string },
+): Promise<GitHubComment[]> {
+  const { owner, repo } = repoOverride ?? githubRepo();
   const comments: GitHubComment[] = [];
   const perPage = 100;
   for (let page = 1; page < 1000; page++) {
@@ -262,13 +270,14 @@ export async function listIssueComments(issueNumber: number): Promise<GitHubComm
 export async function closeIssue(
   issueNumber: number,
   stateReason: "completed" | "not_planned",
+  repo?: { owner: string; repo: string },
 ): Promise<GitHubIssueSummary> {
   const { data } = await githubRequest<{
     number: number;
     html_url: string;
     state: string;
     state_reason: string | null;
-  }>("PATCH", `${repoPath()}/issues/${issueNumber}`, {
+  }>("PATCH", `${repoPath(repo)}/issues/${issueNumber}`, {
     state: "closed",
     state_reason: stateReason,
   });
@@ -293,22 +302,28 @@ export interface IssueSummary {
  * the sub-issue and dependency APIs both key off this, and a caller only ever
  * hands this server a plain issue number.
  */
-export async function getIssueSummary(number: number): Promise<IssueSummary> {
+export async function getIssueSummary(
+  number: number,
+  repo?: { owner: string; repo: string },
+): Promise<IssueSummary> {
   const { data } = await githubRequest<{
     number: number;
     id: number;
     title: string;
     state: string;
     html_url: string;
-  }>("GET", `${repoPath()}/issues/${number}`);
+  }>("GET", `${repoPath(repo)}/issues/${number}`);
   return { number: data.number, id: data.id, title: data.title, state: data.state, htmlUrl: data.html_url };
 }
 
 /** Real sub-issues of `number`, in GitHub's own order. */
-export async function listSubIssues(number: number): Promise<IssueSummary[]> {
+export async function listSubIssues(
+  number: number,
+  repo?: { owner: string; repo: string },
+): Promise<IssueSummary[]> {
   const { data } = await githubRequest<
     Array<{ number: number; id: number; title: string; state: string; html_url: string }>
-  >("GET", `${repoPath()}/issues/${number}/sub_issues`);
+  >("GET", `${repoPath(repo)}/issues/${number}/sub_issues`);
   return data.map((d) => ({ number: d.number, id: d.id, title: d.title, state: d.state, htmlUrl: d.html_url }));
 }
 
@@ -316,39 +331,60 @@ export async function listSubIssues(number: number): Promise<IssueSummary[]> {
  * Adds `childNumber` as a sub-issue of `parentNumber`. Resolves the child's real
  * `id` internally — the caller only ever passes issue numbers. Per GitHub's own
  * one-parent-at-a-time rule, a child already parented elsewhere must be removed
- * from its old parent first (see removeSubIssue) or this call fails.
+ * from its old parent first (see removeSubIssue) or this call fails. `repo`
+ * (Git #3580) is applied to both the parent and child lookups — a single call
+ * targets one repo, not a cross-repo pairing.
  */
-export async function addSubIssue(parentNumber: number, childNumber: number): Promise<IssueSummary[]> {
-  const child = await getIssueSummary(childNumber);
-  await githubRequest("POST", `${repoPath()}/issues/${parentNumber}/sub_issues`, { sub_issue_id: child.id });
-  return listSubIssues(parentNumber);
+export async function addSubIssue(
+  parentNumber: number,
+  childNumber: number,
+  repo?: { owner: string; repo: string },
+): Promise<IssueSummary[]> {
+  const child = await getIssueSummary(childNumber, repo);
+  await githubRequest("POST", `${repoPath(repo)}/issues/${parentNumber}/sub_issues`, { sub_issue_id: child.id });
+  return listSubIssues(parentNumber, repo);
 }
 
 /** Removes `childNumber` as a sub-issue of `parentNumber` (for re-parenting). */
-export async function removeSubIssue(parentNumber: number, childNumber: number): Promise<IssueSummary[]> {
-  const child = await getIssueSummary(childNumber);
-  await githubRequest("DELETE", `${repoPath()}/issues/${parentNumber}/sub_issue`, { sub_issue_id: child.id });
-  return listSubIssues(parentNumber);
+export async function removeSubIssue(
+  parentNumber: number,
+  childNumber: number,
+  repo?: { owner: string; repo: string },
+): Promise<IssueSummary[]> {
+  const child = await getIssueSummary(childNumber, repo);
+  await githubRequest("DELETE", `${repoPath(repo)}/issues/${parentNumber}/sub_issue`, { sub_issue_id: child.id });
+  return listSubIssues(parentNumber, repo);
 }
 
 /** Real current `blocked_by` edges for `number` — who it's actually waiting on, with live state. */
-export async function listBlockedBy(number: number): Promise<IssueSummary[]> {
+export async function listBlockedBy(
+  number: number,
+  repo?: { owner: string; repo: string },
+): Promise<IssueSummary[]> {
   const { data } = await githubRequest<
     Array<{ number: number; id: number; title: string; state: string; html_url: string }>
-  >("GET", `${repoPath()}/issues/${number}/dependencies/blocked_by`);
+  >("GET", `${repoPath(repo)}/issues/${number}/dependencies/blocked_by`);
   return data.map((d) => ({ number: d.number, id: d.id, title: d.title, state: d.state, htmlUrl: d.html_url }));
 }
 
 /** Adds one real `blocked_by` edge from `number` to `blockerNumber`. */
-export async function addBlockedBy(number: number, blockerNumber: number): Promise<void> {
-  const blocker = await getIssueSummary(blockerNumber);
-  await githubRequest("POST", `${repoPath()}/issues/${number}/dependencies/blocked_by`, { issue_id: blocker.id });
+export async function addBlockedBy(
+  number: number,
+  blockerNumber: number,
+  repo?: { owner: string; repo: string },
+): Promise<void> {
+  const blocker = await getIssueSummary(blockerNumber, repo);
+  await githubRequest("POST", `${repoPath(repo)}/issues/${number}/dependencies/blocked_by`, { issue_id: blocker.id });
 }
 
 /** Removes one real `blocked_by` edge from `number` to `blockerNumber`. */
-export async function removeBlockedBy(number: number, blockerNumber: number): Promise<void> {
-  const blocker = await getIssueSummary(blockerNumber);
-  await githubRequest("DELETE", `${repoPath()}/issues/${number}/dependencies/blocked_by/${blocker.id}`);
+export async function removeBlockedBy(
+  number: number,
+  blockerNumber: number,
+  repo?: { owner: string; repo: string },
+): Promise<void> {
+  const blocker = await getIssueSummary(blockerNumber, repo);
+  await githubRequest("DELETE", `${repoPath(repo)}/issues/${number}/dependencies/blocked_by/${blocker.id}`);
 }
 
 /** The raw shape GitHub's REST API returns for an issue (the fields these tools use). */
