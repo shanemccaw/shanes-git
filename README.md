@@ -112,13 +112,63 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
   internally; caller only ever passes issue numbers. Fails with GitHub's own error if the child
   already has a different parent (GitHub's one-parent-at-a-time rule) — remove it there first.
 - `remove_sub_issue(parent_number, child_number, repo?)` — detaches a sub-issue, for re-parenting.
-- `list_sub_issues(number, repo?)` — the real, current sub-issue list of one issue.
+- `list_sub_issues(number, repo?)` — the real, current sub-issue list of one issue. Requests
+  `per_page=100` (Git #3708) — GitHub's own default page is 30, which was silently truncating this
+  for any parent with more children than that (confirmed live: #1202 returned only 30 of a real
+  100). 100 is GitHub's real structural per-parent cap, so one page always covers it.
 - `set_blocked_by(number, blocker_numbers[], repo?)` — makes `number`'s real `blocked_by` edges
   match `blocker_numbers[]` exactly: adds missing edges, removes stale ones no longer in the list
   (pass `[]` to clear). A true "set", not just an append — the CLAUDE.md Git #1987 rule that a
   stale edge pointing at a closed/wrong issue silently reads as "clear" is exactly what this
   reconciles.
 - `list_blocked_by(number, repo?)` — real current blockers of `number` + their live GitHub state.
+  Same `per_page=100` fix as `list_sub_issues`.
+
+### Epic → Feature → Issue hierarchy + proactive cap overflow (Git #3708)
+
+Real, confirmed convention (Shane, 2026-09-11 — CLAUDE.md's "Feature-first, area epic as fallback"
+section): every bug or suggestion is filed as a sub-issue of a **Feature**, never directly under an
+**Epic**. Nothing previously enforced this — a real live sweep the same night found 83 issues
+mis-parented directly under Epic #1202. `add_sub_issue` now enforces it at write time, and
+proactively steers around GitHub's real 100-sub-issue-per-parent hard cap while it's at it
+(`src/hierarchy.ts`):
+
+- **Classification** (`classifyIssueTitle` in `src/github.ts`) — an issue's own title decides its
+  tier: an `EPIC:`/`Epic:` prefix is an Epic, a `Feature:` prefix is a Feature (case-insensitive),
+  anything else is a plain issue.
+- **Enforcement** (`enforceHierarchyOrThrow`) — if `parent_number` classifies as an Epic and
+  `child_number` does NOT classify as a Feature, the call is rejected before any GitHub write, with
+  a clear error naming both real issues and the rule. A Feature under an Epic, or any issue under a
+  Feature (or an unclassified parent), is unrestricted.
+- **Proactive overflow** (`resolveOverflowParent`) — if `parent_number` classifies as a Feature and
+  is already at or near GitHub's real 100-sub-issue cap (≥95 real children), the child is
+  automatically redirected before it can hit a raw `422`:
+  1. Look up the Feature's real parent Epic (`getParentIssue`, `GET /issues/{number}/parent`).
+  2. Search that Epic's real children for an existing `"<Feature title> — Part N"` sibling (same
+     naming pattern already live for #1788→#3706 / #1789→#3707) with room, and use the lowest-N one
+     that has it.
+  3. If none has room, create the next real `"Part N"` overflow Feature under the same Epic and use
+     that instead.
+  4. If the Feature has no parent Epic at all, no redirect target is defined — the call proceeds
+     against the originally-requested parent as a best effort; a genuine `422` from GitHub in that
+     case is a real, honest failure, not one this masks.
+
+  `add_sub_issue`'s response always names which real parent the child actually landed under:
+  `{ parentNumber, requestedParentNumber, redirected, redirectReason, childNumber, subIssues }` —
+  `parentNumber` is the real parent used (equal to `requestedParentNumber` unless `redirected` is
+  true).
+
+- **Real verification (2026-09-12):** `npm run verify-hierarchy` — `list_sub_issues(#1096)` (a real
+  Epic with 72 live children) returns more than GitHub's 30-row default page; a real non-Feature
+  issue added under real Epic #1202 is rejected with `HierarchyViolationError` before any write,
+  while a real Feature-titled issue under the same Epic is not; the overflow title/naming helpers
+  reproduce the real, already-live `#1788 → #3706` title exactly
+  (`"Feature: Build Queue Panel (BuildConsole)"` → `"Feature: Build Queue Panel — Part 2
+  (BuildConsole)"`); `resolveOverflowParent` against a real Feature nowhere near the cap correctly
+  does not redirect. Deliberately does not exercise the genuinely-at-cap redirect/create branch
+  live, since that performs a real write (`create_issue` + `add_sub_issue`) — that branch is
+  covered by direct code review of the same functions the no-redirect path already proves are
+  wired correctly.
 
 **Core issue operations (Git #3391)** — real reads/writes against issues:
 
@@ -283,6 +333,12 @@ npm run verify-contents   # Git #3697 — calls get_file_contents / list_directo
                           # decoded file text, an explicit ref, the directory/file/".." refusals,
                           # both search backends, and that the PAT never appears in any result.
                           # Needs no database.
+
+npm run verify-hierarchy  # Git #3708 — real list_sub_issues/list_blocked_by per_page=100 read,
+                          # real Epic/Feature classification and hierarchy-violation rejection,
+                          # real overflow-title naming against the live #1788->#3706 pattern, and
+                          # a real no-redirect-needed resolveOverflowParent read. Never performs a
+                          # real add/create write. Needs no database.
 ```
 
 ## Schema

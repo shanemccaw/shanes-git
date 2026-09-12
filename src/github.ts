@@ -323,14 +323,21 @@ export async function getIssueSummary(
   return { number: data.number, id: data.id, title: data.title, state: data.state, htmlUrl: data.html_url };
 }
 
-/** Real sub-issues of `number`, in GitHub's own order. */
+/**
+ * Real sub-issues of `number`, in GitHub's own order. `per_page=100` (Git
+ * #3708) — GitHub's own default of 30 was silently truncating this for any
+ * parent with more children than that (confirmed live: #1202 returned only
+ * 30 of a real 100). 100 is GitHub's real structural per-parent hard cap
+ * (`SUB_ISSUE_HARD_CAP` below), so one page always covers the genuine
+ * maximum — no further pagination is possible here.
+ */
 export async function listSubIssues(
   number: number,
   repo?: { owner: string; repo: string },
 ): Promise<IssueSummary[]> {
   const { data } = await githubRequest<
     Array<{ number: number; id: number; title: string; state: string; html_url: string }>
-  >("GET", `${repoPath(repo)}/issues/${number}/sub_issues`);
+  >("GET", `${repoPath(repo)}/issues/${number}/sub_issues?per_page=100`);
   return data.map((d) => ({ number: d.number, id: d.id, title: d.title, state: d.state, htmlUrl: d.html_url }));
 }
 
@@ -363,14 +370,18 @@ export async function removeSubIssue(
   return listSubIssues(parentNumber, repo);
 }
 
-/** Real current `blocked_by` edges for `number` — who it's actually waiting on, with live state. */
+/**
+ * Real current `blocked_by` edges for `number` — who it's actually waiting
+ * on, with live state. `per_page=100` (Git #3708) — same 30-row default-page
+ * truncation risk as `listSubIssues` above, closed the same way.
+ */
 export async function listBlockedBy(
   number: number,
   repo?: { owner: string; repo: string },
 ): Promise<IssueSummary[]> {
   const { data } = await githubRequest<
     Array<{ number: number; id: number; title: string; state: string; html_url: string }>
-  >("GET", `${repoPath(repo)}/issues/${number}/dependencies/blocked_by`);
+  >("GET", `${repoPath(repo)}/issues/${number}/dependencies/blocked_by?per_page=100`);
   return data.map((d) => ({ number: d.number, id: d.id, title: d.title, state: d.state, htmlUrl: d.html_url }));
 }
 
@@ -631,4 +642,64 @@ export async function fetchRepoTree(
   };
   treeCache.set(key, { fetchedAt: Date.now(), tree });
   return tree;
+}
+
+/* ------------------------------------------------------------------------- *
+ * Epic → Feature → Issue hierarchy (Git #3708)
+ *
+ * Real, confirmed convention (Shane, 2026-09-11, CLAUDE.md's "Feature-first,
+ * area epic as fallback" section): every bug or suggestion is filed as a
+ * sub-issue of a Feature, never directly under an Epic. This classifies an
+ * issue by its own title's real prefix — the same convention already used
+ * across this repo's dispatch tooling — and exposes GitHub's real per-parent
+ * sub-issue cap and its "get the real parent" endpoint, both needed to
+ * enforce that convention and to steer around the cap proactively.
+ * ------------------------------------------------------------------------- */
+
+export type IssueTier = "epic" | "feature" | "other";
+
+/**
+ * Classifies an issue by its own title, per this repo's real classification
+ * convention: an `EPIC:`/`Epic:` prefix marks an Epic, a `Feature:` prefix
+ * marks a Feature. Case-insensitive, leading whitespace tolerated. Anything
+ * else (a plain bug/suggestion, or an issue with no such prefix) is "other".
+ */
+export function classifyIssueTitle(title: string): IssueTier {
+  const trimmed = title.trim();
+  if (/^epic\s*:/i.test(trimmed)) return "epic";
+  if (/^feature\s*:/i.test(trimmed)) return "feature";
+  return "other";
+}
+
+/**
+ * GitHub's real, confirmed hard cap on sub-issues per parent (Git #3708's own
+ * body: #1202, #1788, and #1789 each independently hit this live). Not
+ * configurable — this is GitHub's own structural limit, not a choice made
+ * here.
+ */
+export const SUB_ISSUE_HARD_CAP = 100;
+
+/**
+ * Fetches the real parent of `number` via GitHub's own
+ * `GET /issues/{number}/parent`, or `null` when it genuinely has none — a
+ * 404 here is GitHub's real, honest "this issue isn't a sub-issue of
+ * anything" answer, not an error to propagate.
+ */
+export async function getParentIssue(
+  number: number,
+  repo?: { owner: string; repo: string },
+): Promise<IssueSummary | null> {
+  try {
+    const { data } = await githubRequest<{
+      number: number;
+      id: number;
+      title: string;
+      state: string;
+      html_url: string;
+    }>("GET", `${repoPath(repo)}/issues/${number}/parent`);
+    return { number: data.number, id: data.id, title: data.title, state: data.state, htmlUrl: data.html_url };
+  } catch (err) {
+    if (err instanceof GitHubError && err.status === 404) return null;
+    throw err;
+  }
 }
