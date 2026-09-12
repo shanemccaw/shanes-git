@@ -26,7 +26,7 @@ const PROJECT_V2_STATUS_FIELD_ID = "PVTSSF_lAHOEiBDdc4BeoiYzhZBRB0";
  * conventions (e.g. "AI Batter Up" for filed findings, never "Batter Up"
  * directly) reserve several of those transitions for Shane's own review step.
  */
-const STATUS_OPTION_ID: Record<string, string> = {
+export const STATUS_OPTION_ID: Record<string, string> = {
   "Batter Up": "09b1927f",
   "Backlog": "63cc47c8",
   "AI Batter Up": "a0296971",
@@ -34,7 +34,7 @@ const STATUS_OPTION_ID: Record<string, string> = {
   "Done": "0003ae3b",
 };
 
-const ALLOWED_STATUSES = Object.keys(STATUS_OPTION_ID);
+export const ALLOWED_STATUSES = Object.keys(STATUS_OPTION_ID);
 
 const ISSUE_NODE_AND_PROJECT_ITEM_QUERY = `
   query($owner: String!, $repo: String!, $number: Int!) {
@@ -78,7 +78,7 @@ interface IssueNodeAndProjectItemResult {
 }
 
 /**
- * `move_to_status(number, status)` — Git #3395. Moves a real issue (or epic;
+ * The real core of `move_to_status` — Git #3395. Moves a real issue (or epic;
  * an epic is itself a GitHub issue) to one of the five real board columns this
  * tool is scoped to. Adds the issue to the board first
  * (`addProjectV2ItemById`) if it isn't already a project item — a
@@ -87,7 +87,51 @@ interface IssueNodeAndProjectItemResult {
  * restricted vocabulary before any GitHub call is made; an unknown string is
  * rejected cleanly with the real allowed list, never silently coerced or
  * defaulted.
+ *
+ * Exported (Git #3709) so `batch_move_to_status` can run this same real,
+ * single-issue move per item — one bad `status`/number in a batch throws only
+ * for that item, never the others.
  */
+export async function moveIssueToStatus(
+  number: number,
+  status: string,
+  repo?: { owner: string; repo: string },
+): Promise<{ number: number; status: string; projectItemId: string; addedToBoard: boolean }> {
+  if (!(status in STATUS_OPTION_ID)) {
+    throw new Error(`"status" must be one of: ${ALLOWED_STATUSES.join(", ")} — got: ${JSON.stringify(status)}`);
+  }
+  const optionId = STATUS_OPTION_ID[status];
+  const { owner, repo: repoName } = resolveRepo(repo);
+
+  const data = await githubGraphQL<IssueNodeAndProjectItemResult>(ISSUE_NODE_AND_PROJECT_ITEM_QUERY, {
+    owner,
+    repo: repoName,
+    number,
+  });
+  const issue = data.repository.issue;
+  if (!issue) throw new GitHubError(404, `repo issue #${number}`, `Issue #${number} not found`);
+
+  let itemId = issue.projectItems.nodes.find((n) => n.project.id === PROJECT_V2_ID)?.id;
+  let addedToBoard = false;
+  if (!itemId) {
+    const added = await githubGraphQL<{ addProjectV2ItemById: { item: { id: string } } }>(
+      ADD_PROJECT_V2_ITEM_MUTATION,
+      { projectId: PROJECT_V2_ID, contentId: issue.id },
+    );
+    itemId = added.addProjectV2ItemById.item.id;
+    addedToBoard = true;
+  }
+
+  await githubGraphQL(UPDATE_PROJECT_V2_ITEM_STATUS_MUTATION, {
+    projectId: PROJECT_V2_ID,
+    itemId,
+    fieldId: PROJECT_V2_STATUS_FIELD_ID,
+    optionId,
+  });
+
+  return { number, status, projectItemId: itemId, addedToBoard };
+}
+
 export const moveToStatusTool: ToolDef = {
   name: "move_to_status",
   description:
@@ -121,40 +165,11 @@ export const moveToStatusTool: ToolDef = {
     if (typeof number !== "number" || !Number.isInteger(number) || number < 1) {
       throw new Error(`"number" must be a positive integer GitHub issue number, got: ${JSON.stringify(number)}`);
     }
-    if (typeof status !== "string" || !(status in STATUS_OPTION_ID)) {
+    if (typeof status !== "string") {
       throw new Error(
         `"status" must be one of: ${ALLOWED_STATUSES.join(", ")} — got: ${JSON.stringify(status)}`,
       );
     }
-    const optionId = STATUS_OPTION_ID[status];
-    const { owner, repo } = resolveRepo(args.repo);
-
-    const data = await githubGraphQL<IssueNodeAndProjectItemResult>(ISSUE_NODE_AND_PROJECT_ITEM_QUERY, {
-      owner,
-      repo,
-      number,
-    });
-    const issue = data.repository.issue;
-    if (!issue) throw new GitHubError(404, `repo issue #${number}`, `Issue #${number} not found`);
-
-    let itemId = issue.projectItems.nodes.find((n) => n.project.id === PROJECT_V2_ID)?.id;
-    let addedToBoard = false;
-    if (!itemId) {
-      const added = await githubGraphQL<{ addProjectV2ItemById: { item: { id: string } } }>(
-        ADD_PROJECT_V2_ITEM_MUTATION,
-        { projectId: PROJECT_V2_ID, contentId: issue.id },
-      );
-      itemId = added.addProjectV2ItemById.item.id;
-      addedToBoard = true;
-    }
-
-    await githubGraphQL(UPDATE_PROJECT_V2_ITEM_STATUS_MUTATION, {
-      projectId: PROJECT_V2_ID,
-      itemId,
-      fieldId: PROJECT_V2_STATUS_FIELD_ID,
-      optionId,
-    });
-
-    return { number, status, projectItemId: itemId, addedToBoard };
+    return moveIssueToStatus(number, status, resolveRepo(args.repo));
   },
 };

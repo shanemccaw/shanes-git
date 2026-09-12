@@ -3,15 +3,63 @@ import { closeIssue, postIssueComment } from "../github.ts";
 import { resolveRepo } from "../env.ts";
 import { CONTEXT_SCHEMA_PROPERTY, REPO_SCHEMA_PROPERTY, requireContext, tagCommentWithContext } from "./args.ts";
 
+export interface CloseOneIssueResult {
+  number: number;
+  htmlUrl: string;
+  state: string;
+  stateReason: string | null;
+  comment: { id: number; htmlUrl: string } | null;
+}
+
 /**
- * Enforces the repo's own standing rule (CLAUDE.md: "A NOT_PLANNED closure
- * always carries a real explanatory comment", Git #2167): a `not_planned`
- * close is REJECTED here — before any GitHub call is made — unless a real,
- * non-empty `comment` is supplied, and that comment is posted FIRST, then the
- * issue is closed. A `completed` close never requires a comment (an optional
- * one is still allowed) since #2167 is specifically about the silent
- * NOT_PLANNED case.
+ * The real core of `close_issue` — enforces the repo's own standing rule
+ * (CLAUDE.md: "A NOT_PLANNED closure always carries a real explanatory
+ * comment", Git #2167): a `not_planned` close is REJECTED here — before any
+ * GitHub call is made — unless a real, non-empty `comment` is supplied, and
+ * that comment is posted FIRST, then the issue is closed. A `completed`
+ * close never requires a comment (an optional one is still allowed) since
+ * #2167 is specifically about the silent NOT_PLANNED case.
+ *
+ * Exported (Git #3709) so `batch_close_issues` runs this same real,
+ * single-issue close per item — one bad state_reason/missing comment in a
+ * batch fails only that item, never the others.
  */
+export async function closeOneIssue(
+  number: number,
+  stateReason: "completed" | "not_planned",
+  comment: string | undefined,
+  context: string,
+  repo?: { owner: string; repo: string },
+): Promise<CloseOneIssueResult> {
+  const rawComment = typeof comment === "string" ? comment.trim() : "";
+
+  if (stateReason === "not_planned" && rawComment.length === 0) {
+    // Rejected BEFORE any GitHub call — no partial state change is possible.
+    throw new Error(
+      "state_reason=not_planned requires a non-empty `comment` explaining the real decision " +
+        "(what changed, what it's superseded by if applicable) — a silent NOT_PLANNED closure " +
+        "is never acceptable (Git #2167). Supply `comment` and retry.",
+    );
+  }
+
+  let postedComment: { id: number; htmlUrl: string } | null = null;
+  if (rawComment.length > 0) {
+    // Comment posts FIRST — if this throws, the issue is never closed, so a
+    // failed comment can never silently leave a commentless NOT_PLANNED close.
+    postedComment = await postIssueComment(number, tagCommentWithContext(context, rawComment), repo);
+  }
+
+  const closed = await closeIssue(number, stateReason, repo);
+
+  return {
+    number: closed.number,
+    htmlUrl: closed.htmlUrl,
+    state: closed.state,
+    stateReason: closed.stateReason,
+    comment: postedComment,
+  };
+}
+
 export const closeIssueTool: ToolDef = {
   name: "close_issue",
   description:
@@ -56,32 +104,7 @@ export const closeIssueTool: ToolDef = {
     if (stateReason !== "completed" && stateReason !== "not_planned") {
       throw new Error('`state_reason` must be "completed" or "not_planned".');
     }
-    const rawComment = typeof args.comment === "string" ? args.comment.trim() : "";
-
-    if (stateReason === "not_planned" && rawComment.length === 0) {
-      // Rejected BEFORE any GitHub call — no partial state change is possible.
-      throw new Error(
-        "state_reason=not_planned requires a non-empty `comment` explaining the real decision " +
-          "(what changed, what it's superseded by if applicable) — a silent NOT_PLANNED closure " +
-          "is never acceptable (Git #2167). Supply `comment` and retry.",
-      );
-    }
-
-    let postedComment: { id: number; htmlUrl: string } | null = null;
-    if (rawComment.length > 0) {
-      // Comment posts FIRST — if this throws, the issue is never closed, so a
-      // failed comment can never silently leave a commentless NOT_PLANNED close.
-      postedComment = await postIssueComment(number, tagCommentWithContext(context, rawComment), repo);
-    }
-
-    const closed = await closeIssue(number, stateReason, repo);
-
-    return {
-      number: closed.number,
-      htmlUrl: closed.htmlUrl,
-      state: closed.state,
-      stateReason: closed.stateReason,
-      comment: postedComment,
-    };
+    const comment = typeof args.comment === "string" ? args.comment : undefined;
+    return closeOneIssue(number, stateReason, comment, context, repo);
   },
 };

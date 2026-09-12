@@ -245,6 +245,52 @@ three are read-only, so none takes `context`.
   dropping it. A query made only of unevaluable qualifiers returns nothing rather than the whole
   repo.
 
+**Batch tools — bulk board/hierarchy management (Git #3709):**
+
+Real, direct motivation, from the issue's own body: the #1202 sub-issue reorganization needed
+166+ individual real `remove_sub_issue`/`add_sub_issue` mutation pairs for 83 issues, done via a
+raw script outside this server entirely because no batch capability existed. These three close
+that gap. Each is a thin loop around its existing single-item tool's own real logic — pulled out
+into a shared exported function (`moveIssueToStatus()` in `move-to-status.ts`, `closeOneIssue()`
+in `close-issue.ts`, `addSubIssueWithHierarchy()`/`reparentSubIssue()` in `hierarchy.ts`) so the
+single-item and batch tools share ONE real implementation rather than two that can drift — run
+**one item at a time, sequentially** (never in parallel, to avoid tripping GitHub's own secondary
+rate limits with a burst of concurrent writes against one repo), with **independent per-item
+success/failure reporting, never all-or-nothing**: one bad item never blocks or rolls back the
+others. Every batch tool returns `{ totalAttempted, succeededCount, failedCount, results[] }`.
+
+- `batch_reparent_sub_issues(moves: [{ issueNumber, fromParent, toParent }], repo?, context)` —
+  for each move, `remove_sub_issue(fromParent)` then `add_sub_issue(toParent)`, applying the same
+  real Git #3708 hierarchy enforcement + proactive 100-sub-issue-cap overflow redirect
+  `add_sub_issue` itself applies. GitHub's one-parent-at-a-time rule means there is no single
+  atomic "move" call — this really is two real writes per item. If the remove half succeeds but
+  the add half then fails, that is a real, distinct partial failure (the child now genuinely has
+  no parent) reported as `{ success: false, partial: true, error }` rather than folded into an
+  ordinary failure that would read as "nothing happened." A full success reports
+  `{ issueNumber, fromParent, toParent, requestedToParent, redirected, redirectReason, success:
+  true }` — `toParent` is the real parent the child actually landed under, which may differ from
+  `requestedToParent` if it was redirected to an overflow Feature.
+- `batch_move_to_status(moves: [{ number, status }], repo?, context)` — bulk Projects v2 board
+  moves, same real 5-value status vocabulary and per-item validation as `move_to_status` (an
+  invalid `status` string fails only that one item). Success reports
+  `{ number, status, projectItemId, addedToBoard, success: true }`.
+- `batch_close_issues(closures: [{ number, stateReason, comment? }], repo?, context)` — bulk
+  closing, same real per-item `close_issue` logic including the standing Git #2167 rule: a
+  `not_planned` closure without a non-empty `comment` fails that item before any GitHub call, and
+  a supplied comment posts (tagged `[chat: <context>]`) before the issue closes. This never closes
+  an issue without a genuine, correctly-formed request to do so per item — the "you never close an
+  issue" convention (Shane's own decision, or an explicit instruction on his behalf, drives every
+  closure) is unchanged; this tool just executes many at once instead of one call each.
+
+**Real verification (2026-09-12):** `npm run verify-batch` — creates real, clearly-labeled
+disposable test issues (`TEST(#3709 batch verify — closed by script)`), runs a real batch of at
+least 10 operations through each of the three tools (each batch deliberately including one item
+targeting a nonexistent issue number, to exercise a real expected failure alongside the real
+successes), confirms the response reports the exact real success/failure split with an accurate
+reason for the failure, confirms the real GitHub state (`getParentIssue`/`listSubIssues` /
+`get_board_status`) actually reflects every reported success, then closes every real test issue
+it created (via `batch_close_issues` itself) so nothing disposable is left open on the board.
+
 ## Multi-repo `repo` parameter (Git #3580, Feature #3378)
 
 Every tool above that actually looks up or writes an issue in a specific repo — `create_issue`,
@@ -286,7 +332,8 @@ Every write ever made through this server authenticates as the same server-side 
 it always shows as authored by `shanemccaw` regardless of which chat/session actually made the
 change — there was no way to trace which chat did what. Every real write tool — `create_issue`,
 `update_issue`, `add_sub_issue`, `remove_sub_issue`, `set_blocked_by`, `post_comment`,
-`close_issue`, `move_to_status` — now requires a `context` string arg. Read-only tools
+`close_issue`, `move_to_status`, `batch_reparent_sub_issues`, `batch_move_to_status`,
+`batch_close_issues` (Git #3709) — now requires a `context` string arg. Read-only tools
 (`get_issue`, `search_issues`, `list_sub_issues`, `list_blocked_by`, `list_comments`,
 `get_recent_activity`, `server_status`, `github_whoami`, `get_board_status`,
 `list_board_column`) are untouched —
@@ -339,6 +386,13 @@ npm run verify-hierarchy  # Git #3708 — real list_sub_issues/list_blocked_by p
                           # real overflow-title naming against the live #1788->#3706 pattern, and
                           # a real no-redirect-needed resolveOverflowParent read. Never performs a
                           # real add/create write. Needs no database.
+
+npm run verify-batch      # Git #3709 — real batch_reparent_sub_issues / batch_move_to_status /
+                          # batch_close_issues runs, each ≥10 real operations including a real
+                          # expected failure, against real disposable test issues this script
+                          # creates and then closes itself. Confirms the per-item
+                          # success/failure split is accurate and the real GitHub state reflects
+                          # every reported success. Needs no database.
 ```
 
 ## Schema

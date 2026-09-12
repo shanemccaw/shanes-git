@@ -20,6 +20,9 @@ import { listBoardColumnTool } from "./list-board-column.ts";
 import { getFileContentsTool } from "./get-file-contents.ts";
 import { listDirectoryTool } from "./list-directory.ts";
 import { searchCodeTool } from "./search-code.ts";
+import { batchReparentSubIssuesTool } from "./batch-reparent-sub-issues.ts";
+import { batchMoveToStatusTool } from "./batch-move-to-status.ts";
+import { batchCloseIssuesTool } from "./batch-close-issues.ts";
 
 /**
  * Every tool this server exposes. The scaffold set (Git #3390) proved the
@@ -29,10 +32,14 @@ import { searchCodeTool } from "./search-code.ts";
  * #3392), move_to_status (Git #3395), get_board_status (Git #3542),
  * list_board_column (Git #3549), and the repository-contents set —
  * get_file_contents / list_directory / search_code (Git #3697), the first
- * tools here that read real CODE rather than tracker metadata — the real
- * GitHub tools landing as sibling sub-issues of Feature #3377. Each adds its
- * own ToolDef file here and appends it to this list. Nothing else about the
- * server changes when a tool is added.
+ * tools here that read real CODE rather than tracker metadata, and the real
+ * batch tools — batch_reparent_sub_issues / batch_move_to_status /
+ * batch_close_issues (Git #3709) — each running its existing single-item
+ * counterpart's real logic once per item, sequentially, with independent
+ * per-item success/failure reporting rather than an all-or-nothing
+ * transaction. All landing as sibling sub-issues of Feature #3377. Each adds
+ * its own ToolDef file here and appends it to this list. Nothing else about
+ * the server changes when a tool is added.
  */
 export const ALL_TOOLS: ToolDef[] = [
   serverStatusTool,
@@ -56,6 +63,9 @@ export const ALL_TOOLS: ToolDef[] = [
   getFileContentsTool,
   listDirectoryTool,
   searchCodeTool,
+  batchReparentSubIssuesTool,
+  batchMoveToStatusTool,
+  batchCloseIssuesTool,
 ];
 
 export const TOOLS_BY_NAME: Map<string, ToolDef> = new Map(ALL_TOOLS.map((t) => [t.name, t]));

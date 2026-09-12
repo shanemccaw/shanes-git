@@ -12,12 +12,14 @@
  */
 import {
   classifyIssueTitle,
+  getIssueSummary,
   getParentIssue,
   listSubIssues,
   normalizeIssue,
   repoPath,
   githubRequest,
   addSubIssue as rawAddSubIssue,
+  removeSubIssue as rawRemoveSubIssue,
   SUB_ISSUE_HARD_CAP,
   type IssueSummary,
   type RawGitHubIssue,
@@ -174,5 +176,117 @@ export async function resolveOverflowParent(
       `#${requestedParent.number} is at/near its real ${SUB_ISSUE_HARD_CAP}-sub-issue cap ` +
       `(${currentSubIssues.length} children) — created new overflow #${created.number} ` +
       `("${newTitle}") under Epic #${epic.number} and landed the child there instead.`,
+  };
+}
+
+/* ------------------------------------------------------------------------- *
+ * Batch tool support (Git #3709, Feature #3377)
+ *
+ * `add_sub_issue`'s own handler does exactly three things: fetch the real
+ * parent+child summaries, enforce the hierarchy, resolve overflow, then
+ * write. `addSubIssueWithHierarchy` is that same real sequence pulled out so
+ * `batch_reparent_sub_issues` (and `add_sub_issue` itself, below) share ONE
+ * real implementation rather than two copies that can drift.
+ * ------------------------------------------------------------------------- */
+
+export interface AddSubIssueWithHierarchyResult {
+  parentNumber: number;
+  requestedParentNumber: number;
+  redirected: boolean;
+  redirectReason: string | null;
+  childNumber: number;
+  subIssues: IssueSummary[];
+}
+
+export async function addSubIssueWithHierarchy(
+  parentNumber: number,
+  childNumber: number,
+  repo?: { owner: string; repo: string },
+): Promise<AddSubIssueWithHierarchyResult> {
+  const [parent, child] = await Promise.all([
+    getIssueSummary(parentNumber, repo),
+    getIssueSummary(childNumber, repo),
+  ]);
+  enforceHierarchyOrThrow(parent, child);
+
+  const resolved = await resolveOverflowParent(parent, repo);
+  const subIssues = await rawAddSubIssue(resolved.targetParentNumber, childNumber, repo);
+  return {
+    parentNumber: resolved.targetParentNumber,
+    requestedParentNumber: parentNumber,
+    redirected: resolved.redirected,
+    redirectReason: resolved.reason,
+    childNumber,
+    subIssues,
+  };
+}
+
+/**
+ * Thrown by `reparentSubIssue` for the one real partial-failure shape a
+ * reparent can hit: the child was genuinely removed from `fromParent` (that
+ * GitHub write succeeded) but then failed to attach under `toParent` (a real
+ * 4xx — e.g. a non-Feature child rejected under an Epic, or a hierarchy
+ * violation). The child now has NO real parent — materially different from
+ * "the move didn't happen" — so `batch_reparent_sub_issues` must report this
+ * distinctly rather than as an ordinary failure.
+ */
+export class ReparentPartialFailureError extends Error {
+  issueNumber: number;
+  fromParent: number;
+  toParent: number;
+  constructor(issueNumber: number, fromParent: number, toParent: number, cause: string) {
+    super(
+      `#${issueNumber} was removed from its real parent #${fromParent} but could NOT be added ` +
+        `under #${toParent}: ${cause} — #${issueNumber} now has NO parent; add it manually.`,
+    );
+    this.name = "ReparentPartialFailureError";
+    this.issueNumber = issueNumber;
+    this.fromParent = fromParent;
+    this.toParent = toParent;
+  }
+}
+
+export interface ReparentSubIssueResult {
+  issueNumber: number;
+  fromParent: number;
+  toParent: number;
+  requestedToParent: number;
+  redirected: boolean;
+  redirectReason: string | null;
+}
+
+/**
+ * One real re-parent move: `remove_sub_issue(fromParent)` then
+ * `add_sub_issue(toParent)` (via `addSubIssueWithHierarchy`, so the same
+ * Epic/Feature enforcement + proactive overflow redirect applies) — GitHub's
+ * own one-parent-at-a-time rule means there is no single atomic "move" call,
+ * so this really is two real writes. If the add half fails after the remove
+ * half already succeeded, throws `ReparentPartialFailureError` rather than a
+ * plain error, so the caller can tell "nothing happened" apart from "the
+ * child is now orphaned."
+ */
+export async function reparentSubIssue(
+  issueNumber: number,
+  fromParent: number,
+  toParent: number,
+  repo?: { owner: string; repo: string },
+): Promise<ReparentSubIssueResult> {
+  await rawRemoveSubIssue(fromParent, issueNumber, repo);
+
+  let added: AddSubIssueWithHierarchyResult;
+  try {
+    added = await addSubIssueWithHierarchy(toParent, issueNumber, repo);
+  } catch (err) {
+    const cause = err instanceof Error ? err.message : String(err);
+    throw new ReparentPartialFailureError(issueNumber, fromParent, toParent, cause);
+  }
+
+  return {
+    issueNumber,
+    fromParent,
+    toParent: added.parentNumber,
+    requestedToParent: toParent,
+    redirected: added.redirected,
+    redirectReason: added.redirectReason,
   };
 }

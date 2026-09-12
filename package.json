@@ -12,7 +12,8 @@
     "revoke-token": "node bin/revoke-token.mjs",
     "smoke": "node scripts/smoke-check.mjs",
     "verify-contents": "node scripts/verify-contents-tools.mjs",
-    "verify-hierarchy": "node scripts/verify-hierarchy-and-caps.mjs"
+    "verify-hierarchy": "node scripts/verify-hierarchy-and-caps.mjs",
+    "verify-batch": "node scripts/verify-batch-tools.mjs"
   },
   "dependencies": {
     "pg": "^8.20.0",

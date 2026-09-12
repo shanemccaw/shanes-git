@@ -1,6 +1,5 @@
 import type { ToolDef } from "./registry.ts";
-import { addSubIssue, getIssueSummary } from "../github.ts";
-import { enforceHierarchyOrThrow, resolveOverflowParent } from "../hierarchy.ts";
+import { addSubIssueWithHierarchy } from "../hierarchy.ts";
 import { resolveRepo } from "../env.ts";
 import { CONTEXT_SCHEMA_PROPERTY, REPO_SCHEMA_PROPERTY, requireContext, requireInt } from "./args.ts";
 
@@ -53,22 +52,6 @@ export const addSubIssueTool: ToolDef = {
     const parentNumber = requireInt(args.parent_number, "parent_number");
     const childNumber = requireInt(args.child_number, "child_number");
     const repo = resolveRepo(args.repo);
-
-    const [parent, child] = await Promise.all([
-      getIssueSummary(parentNumber, repo),
-      getIssueSummary(childNumber, repo),
-    ]);
-    enforceHierarchyOrThrow(parent, child);
-
-    const resolved = await resolveOverflowParent(parent, repo);
-    const subIssues = await addSubIssue(resolved.targetParentNumber, childNumber, repo);
-    return {
-      parentNumber: resolved.targetParentNumber,
-      requestedParentNumber: parentNumber,
-      redirected: resolved.redirected,
-      redirectReason: resolved.reason,
-      childNumber,
-      subIssues,
-    };
+    return addSubIssueWithHierarchy(parentNumber, childNumber, repo);
   },
 };
