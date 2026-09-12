@@ -52,11 +52,18 @@ export interface GitHubResponse<T> {
  * appended to the API base (e.g. "/user", "/repos/o/r/issues"). Returns parsed
  * JSON plus the token's reported scopes. Throws GitHubError on any non-2xx,
  * with the PAT scrubbed from the message defensively.
+ *
+ * `options.accept` overrides the default `application/vnd.github+json` Accept
+ * header for the endpoints that genuinely need a different media type — today
+ * only `search_code`, which asks for `…text-match+json` to get real matched
+ * fragments back (Git #3697). The response is still parsed as JSON; this is not
+ * an escape hatch for raw/binary bodies.
  */
 export async function githubRequest<T = unknown>(
   method: string,
   path: string,
   body?: unknown,
+  options?: { accept?: string },
 ): Promise<GitHubResponse<T>> {
   const pat = githubPat();
   if (!pat) throw new PatNotConfiguredError();
@@ -68,7 +75,7 @@ export async function githubRequest<T = unknown>(
       method,
       headers: {
         Authorization: `Bearer ${pat}`,
-        Accept: "application/vnd.github+json",
+        Accept: options?.accept ?? "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": USER_AGENT,
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
@@ -443,4 +450,185 @@ export function normalizeIssue(raw: RawGitHubIssue): NormalizedIssue {
     commentCount: raw.comments,
     isPullRequest: raw.pull_request !== undefined,
   };
+}
+
+/* ------------------------------------------------------------------------- *
+ * Repository contents (Git #3697)
+ *
+ * Everything below reads real repository CODE rather than issue/board
+ * metadata. Same server-side-only PAT, same never-log-it discipline — the
+ * private repo is readable here precisely because the PAT lives on the server
+ * and never crosses into chat.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * GitHub's own inline-content ceiling on the Contents API. At or under this the
+ * API returns real base64 `content`; above it the same call returns the entry's
+ * metadata with `content: ""` and `encoding: "none"`, which is what
+ * get_file_contents reports honestly as "too large" rather than as empty text.
+ * Documented at https://docs.github.com/rest/repos/contents.
+ */
+export const CONTENTS_INLINE_MAX_BYTES = 1024 * 1024;
+
+/** GitHub's own cap on how many entries one Contents directory listing returns. */
+export const CONTENTS_DIRECTORY_MAX_ENTRIES = 1000;
+
+/** One entry exactly as GitHub's Contents API returns it (the fields used here). */
+export interface RawContentEntry {
+  type: "file" | "dir" | "symlink" | "submodule";
+  name: string;
+  path: string;
+  sha: string;
+  size: number;
+  html_url: string | null;
+  download_url: string | null;
+  content?: string;
+  encoding?: string;
+  target?: string;
+  submodule_git_url?: string;
+}
+
+/**
+ * Normalizes a repo path for the Contents API: strips leading/trailing slashes
+ * and `./`, collapses duplicate separators, and percent-encodes each segment
+ * individually so a real path containing spaces or `#` survives while the `/`
+ * separators stay separators. Rejects `..` outright — the Contents API would
+ * resolve it server-side and there is no legitimate reason a chat needs it.
+ */
+export function encodeContentsPath(rawPath: string): string {
+  const cleaned = rawPath
+    .split("\\")
+    .join("/")
+    .replace(/^\.\//, "")
+    .replace(/^\/+|\/+$/g, "");
+  if (!cleaned) return "";
+  const segments = cleaned.split("/").filter((s) => s.length > 0 && s !== ".");
+  if (segments.some((s) => s === "..")) {
+    throw new Error(`path must not contain ".." segments, got: ${rawPath}`);
+  }
+  return segments.map(encodeURIComponent).join("/");
+}
+
+/**
+ * One real Contents API call. Returns an array for a directory and a single
+ * object for a file — GitHub's own shape, handed back unchanged so the two
+ * calling tools can each reject the wrong one with a useful message instead of
+ * guessing. A 404 is rethrown with the real path/ref named, because GitHub's
+ * own "Not Found" alone doesn't say which of the two was wrong.
+ */
+export async function fetchContents(
+  path: string,
+  ref: string | undefined,
+  repo?: { owner: string; repo: string },
+): Promise<RawContentEntry | RawContentEntry[]> {
+  const encoded = encodeContentsPath(path);
+  const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
+  try {
+    const { data } = await githubRequest<RawContentEntry | RawContentEntry[]>(
+      "GET",
+      `${repoPath(repo)}/contents/${encoded}${query}`,
+    );
+    return data;
+  } catch (err) {
+    if (err instanceof GitHubError && err.status === 404) {
+      const { owner, repo: name } = repo ?? githubRepo();
+      throw new Error(
+        `No such path "${path || "/"}" in ${owner}/${name}` +
+          (ref ? ` at ref "${ref}"` : " on the default branch") +
+          ". Check the path (it is case-sensitive and repo-root-relative) or list its parent " +
+          "directory with list_directory first.",
+      );
+    }
+    throw err;
+  }
+}
+
+/** The normalized directory/entry shape both contents tools return to a chat. */
+export interface ContentEntrySummary {
+  name: string;
+  path: string;
+  type: RawContentEntry["type"];
+  size: number;
+  sha: string;
+  htmlUrl: string | null;
+  downloadUrl: string | null;
+}
+
+export function normalizeContentEntry(raw: RawContentEntry): ContentEntrySummary {
+  return {
+    name: raw.name,
+    path: raw.path,
+    type: raw.type,
+    size: raw.size,
+    sha: raw.sha,
+    htmlUrl: raw.html_url,
+    downloadUrl: raw.download_url,
+  };
+}
+
+/**
+ * True when a decoded blob is not real text — a NUL byte in the first 8 KiB is
+ * git's own heuristic for the same question. Handing a chat the UTF-8
+ * mis-decoding of a PNG would be worse than saying plainly that it's binary.
+ */
+export function looksBinary(buf: Buffer): boolean {
+  const window = buf.subarray(0, Math.min(buf.length, 8192));
+  return window.includes(0);
+}
+
+/** One blob in the repo's real recursive git tree. */
+export interface RepoTreeBlob {
+  path: string;
+  sha: string;
+  size: number;
+}
+
+export interface RepoTree {
+  /** The commit/tree ref this listing was taken at. */
+  ref: string;
+  blobs: RepoTreeBlob[];
+  /** GitHub's own flag: the tree was too large to return in full. */
+  truncated: boolean;
+}
+
+const treeCache = new Map<string, { fetchedAt: number; tree: RepoTree }>();
+const TREE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * The repo's whole file list in ONE call — `GET /git/trees/{ref}?recursive=1`.
+ *
+ * This exists because GitHub's legacy Code Search index genuinely returns
+ * nothing for this repository (Git #3697: `incomplete_results: true` with
+ * `total_count: 0` on every query tried, while the identical call against a
+ * public repo returns real hits). The tree endpoint has no such index
+ * dependency — it reads git objects directly — so it is what makes
+ * `search_code` able to answer anything at all here.
+ *
+ * Cached in-process for five minutes per (repo, ref): the response for this
+ * repo is ~7,000 entries, and re-fetching it on every search would be a real
+ * bandwidth cost for a listing that changes only when someone pushes.
+ */
+export async function fetchRepoTree(
+  ref: string,
+  repo?: { owner: string; repo: string },
+): Promise<RepoTree> {
+  const { owner, repo: name } = repo ?? githubRepo();
+  const key = `${owner}/${name}@${ref}`;
+  const cached = treeCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < TREE_CACHE_TTL_MS) return cached.tree;
+
+  const { data } = await githubRequest<{
+    truncated: boolean;
+    tree: Array<{ path: string; type: string; sha: string; size?: number }>;
+  }>("GET", `${repoPath(repo)}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
+
+  const tree: RepoTree = {
+    ref,
+    truncated: data.truncated === true,
+    blobs: data.tree
+      .filter((e) => e.type === "blob")
+      .map((e) => ({ path: e.path, sha: e.sha, size: e.size ?? 0 })),
+  };
+  treeCache.set(key, { fetchedAt: Date.now(), tree });
+  return tree;
 }

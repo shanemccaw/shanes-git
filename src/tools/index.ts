@@ -17,17 +17,22 @@ import { listBlockedByTool } from "./list-blocked-by.ts";
 import { moveToStatusTool } from "./move-to-status.ts";
 import { getBoardStatusTool } from "./get-board-status.ts";
 import { listBoardColumnTool } from "./list-board-column.ts";
+import { getFileContentsTool } from "./get-file-contents.ts";
+import { listDirectoryTool } from "./list-directory.ts";
+import { searchCodeTool } from "./search-code.ts";
 
 /**
  * Every tool this server exposes. The scaffold set (Git #3390) proved the
  * auth + server-side-PAT + audit spine end-to-end. On top of it: core issue
  * operations (Git #3391), close_issue (Git #3394), post_comment/list_comments
  * (Git #3393), the sub-issue hierarchy + blocked_by dependency set (Git
- * #3392), move_to_status (Git #3395), get_board_status (Git #3542), and
- * list_board_column (Git #3549) — the real GitHub tools landing as sibling
- * sub-issues of Feature #3377. Each adds its own ToolDef file here and
- * appends it to this list. Nothing else about the server changes when a
- * tool is added.
+ * #3392), move_to_status (Git #3395), get_board_status (Git #3542),
+ * list_board_column (Git #3549), and the repository-contents set —
+ * get_file_contents / list_directory / search_code (Git #3697), the first
+ * tools here that read real CODE rather than tracker metadata — the real
+ * GitHub tools landing as sibling sub-issues of Feature #3377. Each adds its
+ * own ToolDef file here and appends it to this list. Nothing else about the
+ * server changes when a tool is added.
  */
 export const ALL_TOOLS: ToolDef[] = [
   serverStatusTool,
@@ -48,6 +53,9 @@ export const ALL_TOOLS: ToolDef[] = [
   moveToStatusTool,
   getBoardStatusTool,
   listBoardColumnTool,
+  getFileContentsTool,
+  listDirectoryTool,
+  searchCodeTool,
 ];
 
 export const TOOLS_BY_NAME: Map<string, ToolDef> = new Map(ALL_TOOLS.map((t) => [t.name, t]));

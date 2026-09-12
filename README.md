@@ -139,6 +139,62 @@ assignees, timestamps, comment count.
 With `move_to_status` (Git #3395) landed above, every tool of Feature #3377's original design is
 now shipped.
 
+**Repository contents — reading real CODE (Git #3697):**
+
+Every tool above reads issue-tracker or board metadata. None of them could read a single line of
+the repository itself, which stopped being survivable the moment the repo went private and
+PAT-in-chat was retired (#3556/#3559): before that a chat could be handed a raw PAT and clone the
+repo; afterwards a chat connected only to `shanes-git` could manage the tracker but could not see
+the code it was discussing. These three close that gap with the same server-side-only PAT. All
+three are read-only, so none takes `context`.
+
+- `get_file_contents(path, ref?, repo?)` — one real file's actual text, base64-decoded from
+  GitHub's Contents API. `path` is repo-root-relative and case-sensitive (`./` and a leading `/`
+  are tolerated; `..` is rejected before any GitHub call). `ref` pins a branch/tag/commit SHA;
+  omitted reads the default branch. Returns `{ path, repo, ref, sha, size, type, htmlUrl,
+  downloadUrl, content, encoding, truncated, binary, note }`.
+
+  **Honest size/content handling**, per the issue's own item 4 — the tool never returns text it
+  didn't actually get:
+  - Over GitHub's ~1 MB inline limit the Contents API returns `content: ""` with
+    `encoding: "none"`, which decoded naively looks exactly like a real empty file. This returns
+    `content: null, truncated: true` with the real byte size and the real `downloadUrl` instead.
+  - A binary file (a NUL byte in the first 8 KiB — git's own heuristic) returns
+    `content: null, binary: true` plus `downloadUrl`, rather than the UTF-8 mis-decoding of a PNG.
+  - A submodule or symlink says so and names its target.
+  - Pointed at a directory it says so and names `list_directory`; a missing path names the real
+    path, repo and ref rather than relaying a bare `404 Not Found`.
+
+- `list_directory(path?, ref?, repo?)` — the navigation half: one directory's real entries
+  (`name`, `path`, `type` of `file`/`dir`/`symlink`/`submodule`, `size`, `sha`, urls).
+  Non-recursive; omit `path` for the repo root. `get_file_contents` is only useful to a caller
+  that already knows a path — this is how it finds one. GitHub caps this endpoint at 1000 entries
+  with no cursor, so a listing at that count is reported `truncated: true` rather than passed off
+  as complete.
+
+- `search_code(query, perPage?, page?, ref?, repo?)` — code search with **two real backends**, and
+  the result always names which one answered in `source`:
+
+  - `"code-search"` — GitHub's own Code Search API, the primary path, with
+    `Accept: application/vnd.github.text-match+json` so each hit carries the real matching
+    fragment rather than only a filename. Default branch only, as GitHub's index is.
+  - `"repo-tree-paths"` — a real PATH search over the repository's full recursive git tree
+    (`GET /git/trees/{ref}?recursive=1`, cached in-process for five minutes per repo+ref because
+    the response is ~7,000 entries here).
+
+  The fallback is not a nicety. **GitHub's code-search index genuinely returns nothing for this
+  repository** — `total_count: 0` with `incomplete_results: true` on every query tried (verified
+  2026-09-11 across seven distinct queries and three repeats, while the identical call against a
+  public repo returned real hits). Without it the tool would answer "no results" for code that
+  demonstrably exists, which is worse than having no tool: a chat reads an empty result as proof
+  of absence. Tracked as its own finding under Feature #3377.
+
+  The fallback matches **paths, not contents**, and says so explicitly in `note` every time. It
+  honours `path:`, `filename:` (with `*`) and `extension:` qualifiers, and reports any qualifier a
+  path alone cannot answer (`language:`, `in:file`, …) in `ignoredQualifiers` rather than silently
+  dropping it. A query made only of unevaluable qualifiers returns nothing rather than the whole
+  repo.
+
 ## Multi-repo `repo` parameter (Git #3580, Feature #3378)
 
 Every tool above that actually looks up or writes an issue in a specific repo — `create_issue`,
@@ -221,6 +277,12 @@ nothing to trace on a read.
 ```
 npm run smoke   # boots the server, mints a token, asserts auth works, a bad/revoked token is
                 # rejected 401, and the PAT never appears in any response body
+
+npm run verify-contents   # Git #3697 — calls get_file_contents / list_directory / search_code
+                          # against the REAL GitHub API with the real server-side PAT: real
+                          # decoded file text, an explicit ref, the directory/file/".." refusals,
+                          # both search backends, and that the PAT never appears in any result.
+                          # Needs no database.
 ```
 
 ## Schema
