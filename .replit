@@ -1,0 +1,13 @@
+run = "npm start"
+entrypoint = "src/index.ts"
+
+[nix]
+channel = "stable-24_05"
+
+[[ports]]
+localPort = 8770
+externalPort = 80
+
+[deployment]
+run = ["npm", "start"]
+deploymentTarget = "autoscale"

@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.6.0"
+  },
   "description": "GitHub MCP server — server-side PAT, bearer-token auth, no token in chat (Git #3390 / Feature #3377)",
   "scripts": {
     "start": "node src/index.ts",

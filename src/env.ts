@@ -107,9 +107,14 @@ export function resolveRepo(repoArg: unknown): { owner: string; repo: string } {
   return parseOwnerRepo(repoArg.trim(), "repo");
 }
 
-/** Host to bind the HTTP listener to. Loopback by default — this is a local operator tool. */
+/**
+ * Host to bind the HTTP listener to. Defaults to all interfaces (0.0.0.0) —
+ * this runs as a real remote Replit deployment, not a local-only process, so
+ * a loopback default would make it unreachable from outside the container.
+ * Still fully overridable via GITHUB_MCP_HOST for real local dev.
+ */
 export function serverHost(): string {
-  return process.env.GITHUB_MCP_HOST ?? "127.0.0.1";
+  return process.env.GITHUB_MCP_HOST ?? "0.0.0.0";
 }
 
 /** Port the MCP HTTP endpoint listens on. */
