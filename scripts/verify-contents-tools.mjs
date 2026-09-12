@@ -128,6 +128,32 @@ await expectError(
   (m) => m.includes("non-empty `path`"),
 );
 
+// 6b. The honest size/binary handling the issue's own item 4 asked for, against
+//     REAL files — discovered from the repo's own git tree so this can't go stale
+//     if a particular oversized/binary file is ever moved or deleted.
+const { fetchRepoTree } = await import("../src/github.ts");
+const tree = await fetchRepoTree("HEAD");
+const oversized = tree.blobs.find((b) => b.size > 1024 * 1024 && b.path.endsWith(".md"));
+if (oversized) {
+  const big = await call("get_file_contents", { path: oversized.path });
+  check(`a real >1MB file (${oversized.path}) returns truncated, not empty text`,
+    big.content === null && big.truncated === true && typeof big.downloadUrl === "string" && big.size > 1024 * 1024,
+    JSON.stringify({ content: big.content, truncated: big.truncated, size: big.size }));
+  check("the >1MB note names the real size and points at downloadUrl",
+    big.note.includes(String(big.size)) && big.note.includes("downloadUrl"), big.note);
+} else {
+  check("a real >1MB file exists to test against", false, "no .md blob over 1MB found in the tree");
+}
+const png = tree.blobs.find((b) => b.path.endsWith(".png") && b.size < 1024 * 1024);
+if (png) {
+  const bin = await call("get_file_contents", { path: png.path });
+  check(`a real binary file (${png.path}) returns binary:true, not mangled text`,
+    bin.content === null && bin.binary === true && typeof bin.downloadUrl === "string",
+    JSON.stringify({ content: typeof bin.content, binary: bin.binary }));
+} else {
+  check("a real binary file exists to test against", false, "no .png blob under 1MB found in the tree");
+}
+
 // 7. directory listings
 const root = await call("list_directory", {});
 check("list_directory lists the repo root with no path", Array.isArray(root.entries) && root.entries.length > 0);
