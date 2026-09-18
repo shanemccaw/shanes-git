@@ -464,6 +464,73 @@ export function normalizeIssue(raw: RawGitHubIssue): NormalizedIssue {
 }
 
 /* ------------------------------------------------------------------------- *
+ * Labels — real additive/subtractive edits (Feature #4692 / #4697)
+ *
+ * `update_issue`'s `labels` field is GitHub's own full-REPLACE PATCH semantics
+ * — a caller that passes it wipes every other real label unless it re-sends the
+ * whole set (the exact footgun #4686 documented). These three helpers are the
+ * true-delta alternative: GitHub's dedicated label sub-resource is inherently
+ * additive/subtractive, so each of these changes only the one label named and
+ * never disturbs the rest.
+ * ------------------------------------------------------------------------- */
+
+/** An issue's real current label names (a focused read for the delta tools). */
+export async function getIssueLabels(
+  number: number,
+  repo?: { owner: string; repo: string },
+): Promise<string[]> {
+  const { data } = await githubRequest<RawGitHubIssue>("GET", `${repoPath(repo)}/issues/${number}`);
+  return normalizeIssue(data).labels;
+}
+
+/**
+ * Adds one label to an issue via `POST /issues/{n}/labels` — GitHub's own
+ * ADDITIVE semantics: it appends the label to whatever is already there and
+ * never replaces the set (unlike `update_issue`'s `labels`). Returns the
+ * resulting full label set. The label must already exist in the repo; GitHub
+ * creates it on the fly only if it doesn't, which matches the existing
+ * `gh issue edit --add-label` behavior the standing conventions rely on.
+ */
+export async function addIssueLabel(
+  number: number,
+  label: string,
+  repo?: { owner: string; repo: string },
+): Promise<string[]> {
+  const { data } = await githubRequest<Array<{ name: string }>>(
+    "POST",
+    `${repoPath(repo)}/issues/${number}/labels`,
+    { labels: [label] },
+  );
+  return data.map((l) => l.name);
+}
+
+/**
+ * Removes one label from an issue via `DELETE /issues/{n}/labels/{name}` —
+ * removes only that label, never the rest. Returns the resulting label set. A
+ * 404 here is GitHub's honest "that label isn't on this issue" (or doesn't
+ * exist in the repo) — treated as a clean no-op that returns the issue's real
+ * current labels, not an error, so a remove of an absent label is idempotent.
+ */
+export async function removeIssueLabel(
+  number: number,
+  label: string,
+  repo?: { owner: string; repo: string },
+): Promise<string[]> {
+  try {
+    const { data } = await githubRequest<Array<{ name: string }>>(
+      "DELETE",
+      `${repoPath(repo)}/issues/${number}/labels/${encodeURIComponent(label)}`,
+    );
+    return data.map((l) => l.name);
+  } catch (err) {
+    if (err instanceof GitHubError && err.status === 404) {
+      return getIssueLabels(number, repo);
+    }
+    throw err;
+  }
+}
+
+/* ------------------------------------------------------------------------- *
  * Repository contents (Git #3697)
  *
  * Everything below reads real repository CODE rather than issue/board

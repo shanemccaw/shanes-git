@@ -12,11 +12,14 @@ const PROJECT_V2_ID = "PVT_kwHOEiBDdc4BeoiY";
 
 /**
  * The same restricted status vocabulary `move_to_status`/`get_board_status`
- * are scoped to (issue #3395's own body). Real board option NAMES, not ids —
- * this tool filters by the field's displayed `name`, matching what
- * `get_board_status` already returns.
+ * are scoped to. Kept in sync with `move-to-status.ts`'s `STATUS_OPTION_ID`
+ * (Feature #4692 / #4697 removed `"Done"` there); leaving this read tool able
+ * to list a `"Done"` column the architecture no longer defines would diverge
+ * the shared vocabulary the file comments claim these tools share. Real board
+ * option NAMES, not ids — this tool filters by the field's displayed `name`,
+ * matching what `get_board_status` already returns.
  */
-const ALLOWED_STATUSES = ["Batter Up", "Backlog", "AI Batter Up", "Ask Shane", "Done"];
+const ALLOWED_STATUSES = ["Batter Up", "Backlog", "AI Batter Up", "Ask Shane"];
 
 const PROJECT_ITEMS_PAGE_QUERY = `
   query($projectId: ID!, $cursor: String) {

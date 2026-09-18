@@ -65,7 +65,20 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
   with a real `state_reason` (`completed` | `not_planned`). `not_planned` is rejected before any
   GitHub call unless a non-empty `comment` is supplied, and that comment posts FIRST, then the
   issue closes — enforcing the repo's standing NOT_PLANNED-always-carries-a-comment rule (Git
-  #2167) in the tool itself rather than trusting the caller to remember.
+  #2167) in the tool itself rather than trusting the caller to remember. On close it also
+  **unconditionally strips any terminal-state labels** the issue carries — `blocked`, `in-flight`,
+  `complete` (Feature #4692 / #4697), which are meaningless once closed — and returns them in
+  `strippedLabels`. It never touches `Shane To-Do`, `bug`, `security`, or any other label. This
+  makes a verifying chat's job just "confirm this is real, say close", not a separate manual
+  label cleanup.
+- `add_label` / `remove_label` (Feature #4692 / #4697) — `add_label(number, label, repo?)` and
+  `remove_label(number, label, repo?)` are the real true-delta label tools. Unlike
+  `update_issue`'s `labels` param — which is GitHub's own full-REPLACE PATCH and wipes every other
+  label unless the caller re-sends the entire set (the footgun #4686 documented) — these read the
+  issue's real current labels FIRST and change only the one-label delta, never disturbing the
+  rest. Each returns `{ number, label, changed, labels }` (`changed: false` is an idempotent
+  no-op when the label is already present/absent). `update_issue`'s full-replace `labels` stays
+  working as-is for any caller that deliberately wants it. Both require `context` (Git #3538).
 - `post_comment` / `list_comments` (Git #3393) — `post_comment(number, body, repo?)` posts a
   comment on an issue/PR verbatim, returning its id/htmlUrl/createdAt; `list_comments(number,
   repo?)` lists every comment oldest-first (paginates through all pages), matching the standing
@@ -74,11 +87,13 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
   plumbing.
 - `move_to_status` (Git #3395) — `move_to_status(number, status, repo?)` moves an issue (or epic — an
   epic is itself an issue) to one of the real Projects v2 board columns this tool is scoped to:
-  `Batter Up`, `Backlog`, `AI Batter Up`, `Ask Shane`, `Done`. Adds the issue to the board first
-  (`addProjectV2ItemById`) if it isn't already a project item, then sets the Status field
-  (`updateProjectV2ItemFieldValue`). `status` is validated against that exact 5-value vocabulary
-  before any GitHub call is made — an unrecognized string is rejected with the real allowed list,
-  never silently coerced. Projects v2 has no REST surface at all, so this is the first tool to use
+  `Batter Up`, `Backlog`, `AI Batter Up`, `Ask Shane`. (`Done` was removed from this enum by
+  Feature #4692 / #4697 — board columns are now pure human gates and real issue *close* is the
+  terminal state; there is no "Done" board column in the architecture anymore.) Adds the issue to
+  the board first (`addProjectV2ItemById`) if it isn't already a project item, then sets the
+  Status field (`updateProjectV2ItemFieldValue`). `status` is validated against that exact
+  4-value vocabulary before any GitHub call is made — an unrecognized string (including `Done`) is
+  rejected with the real allowed list, never silently coerced. Projects v2 has no REST surface at all, so this is the first tool to use
   `githubGraphQL()` in `src/github.ts` — same server-side-only-PAT discipline as `githubRequest()`,
   just against `https://api.github.com/graphql`. Board/field ids
   (`PVT_kwHOEiBDdc4BeoiY` / `PVTSSF_lAHOEiBDdc4BeoiYzhZBRB0`) and their real option ids are the
@@ -104,7 +119,8 @@ Clients with no header field can use the capability-URL form: `POST /mcp/t/<toke
   title, epicNumber, epicTitle }], totalCount }`. Replaces the slow, error-prone workaround #3549
   found live: a text `search_issues` (GitHub's search doesn't know Projects v2 Status at all)
   followed by one `get_board_status` call per candidate to confirm which were actually on the
-  column. Read-only, no `context` required.
+  column. Read-only, no `context` required. Its status enum is kept in sync with `move_to_status`
+  (`Batter Up`, `Backlog`, `AI Batter Up`, `Ask Shane` — `Done` removed by Feature #4692 / #4697).
 
 **Sub-issue hierarchy + blocked_by dependencies (Git #3392):**
 
@@ -331,9 +347,10 @@ shape (e.g. `"shanemccaw/some-other-repo"`).
 Every write ever made through this server authenticates as the same server-side PAT, so on GitHub
 it always shows as authored by `shanemccaw` regardless of which chat/session actually made the
 change — there was no way to trace which chat did what. Every real write tool — `create_issue`,
-`update_issue`, `add_sub_issue`, `remove_sub_issue`, `set_blocked_by`, `post_comment`,
-`close_issue`, `move_to_status`, `batch_reparent_sub_issues`, `batch_move_to_status`,
-`batch_close_issues` (Git #3709) — now requires a `context` string arg. Read-only tools
+`update_issue`, `add_label`, `remove_label` (Feature #4692 / #4697), `add_sub_issue`,
+`remove_sub_issue`, `set_blocked_by`, `post_comment`, `close_issue`, `move_to_status`,
+`batch_reparent_sub_issues`, `batch_move_to_status`, `batch_close_issues` (Git #3709) — now
+requires a `context` string arg. Read-only tools
 (`get_issue`, `search_issues`, `list_sub_issues`, `list_blocked_by`, `list_comments`,
 `get_recent_activity`, `server_status`, `github_whoami`, `get_board_status`,
 `list_board_column`) are untouched —
@@ -386,6 +403,11 @@ npm run verify-hierarchy  # Git #3708 — real list_sub_issues/list_blocked_by p
                           # real overflow-title naming against the live #1788->#3706 pattern, and
                           # a real no-redirect-needed resolveOverflowParent read. Never performs a
                           # real add/create write. Needs no database.
+
+npm run verify-labels     # #4697 — real add_label/remove_label true-delta + close_issue's
+                          # terminal-state-label strip + `Done` removed from the move_to_status /
+                          # list_board_column enums, all against the REAL GitHub API. Creates and
+                          # then closes one real disposable test issue; needs no database.
 
 npm run verify-batch      # Git #3709 — real batch_reparent_sub_issues / batch_move_to_status /
                           # batch_close_issues runs, each ≥10 real operations including a real

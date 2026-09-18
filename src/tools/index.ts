@@ -6,6 +6,7 @@ import { closeIssueTool } from "./close-issue.ts";
 import { createIssueTool } from "./create-issue.ts";
 import { getIssueTool } from "./get-issue.ts";
 import { updateIssueTool } from "./update-issue.ts";
+import { addLabelTool, removeLabelTool } from "./labels.ts";
 import { searchIssuesTool } from "./search-issues.ts";
 import { postCommentTool } from "./post-comment.ts";
 import { listCommentsTool } from "./list-comments.ts";
@@ -48,6 +49,8 @@ export const ALL_TOOLS: ToolDef[] = [
   createIssueTool,
   getIssueTool,
   updateIssueTool,
+  addLabelTool,
+  removeLabelTool,
   searchIssuesTool,
   closeIssueTool,
   postCommentTool,

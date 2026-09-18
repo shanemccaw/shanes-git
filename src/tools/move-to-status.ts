@@ -15,23 +15,26 @@ const PROJECT_V2_ID = "PVT_kwHOEiBDdc4BeoiY";
 const PROJECT_V2_STATUS_FIELD_ID = "PVTSSF_lAHOEiBDdc4BeoiYzhZBRB0";
 
 /**
- * The restricted status set this tool is scoped to (issue #3395's own body:
- * "Batter Up / Backlog / AI Batter Up / Ask Shane / Done"). Real board option
- * ids, queried live via `gh api graphql` against the Status field above —
- * NOT the different backlog/in_progress/done trio admin-build-tracker.ts
- * writes; this is a separate, smaller, explicitly-named vocabulary. Other real
- * columns exist on the board (In review, Architecting, In progress, Need to
- * Test, Zoho, EngageBay, Shane Declined, Park, Verifying, Crashed) but this
- * tool deliberately does not expose them — CLAUDE.md's board-status
- * conventions (e.g. "AI Batter Up" for filed findings, never "Batter Up"
- * directly) reserve several of those transitions for Shane's own review step.
+ * The restricted status set this tool is scoped to. Per the 2026-09-18 board
+ * simplification (Feature #4692, issue #4697), board columns are now four pure
+ * human-gate columns — "Batter Up / Backlog / AI Batter Up / Ask Shane". Real
+ * GitHub issue *close* is the terminal state; there is no "Done" board column
+ * in the architecture anymore, so `"Done"` was removed from this enum (its old
+ * option id was `0003ae3b`). Real board option ids, queried live via `gh api
+ * graphql` against the Status field above — NOT the different
+ * backlog/in_progress/done trio admin-build-tracker.ts writes; this is a
+ * separate, smaller, explicitly-named vocabulary. Other real columns exist on
+ * the board (In review, Architecting, In progress, Need to Test, Zoho,
+ * EngageBay, Shane Declined, Park, Verifying, Crashed) but this tool
+ * deliberately does not expose them — CLAUDE.md's board-status conventions
+ * (e.g. "AI Batter Up" for filed findings, never "Batter Up" directly) reserve
+ * several of those transitions for Shane's own review step.
  */
 export const STATUS_OPTION_ID: Record<string, string> = {
   "Batter Up": "09b1927f",
   "Backlog": "63cc47c8",
   "AI Batter Up": "a0296971",
   "Ask Shane": "404998bb",
-  "Done": "0003ae3b",
 };
 
 export const ALLOWED_STATUSES = Object.keys(STATUS_OPTION_ID);

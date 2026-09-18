@@ -1,7 +1,28 @@
 import type { ToolDef } from "./registry.ts";
-import { closeIssue, postIssueComment } from "../github.ts";
+import { closeIssue, getIssueLabels, postIssueComment, removeIssueLabel } from "../github.ts";
 import { resolveRepo } from "../env.ts";
 import { CONTEXT_SCHEMA_PROPERTY, REPO_SCHEMA_PROPERTY, requireContext, tagCommentWithContext } from "./args.ts";
+
+/**
+ * The real terminal-state labels this architecture (Feature #4692 / #4697)
+ * defines as meaningless once an issue is closed — stripped unconditionally on
+ * every close so a verifying chat's whole job is "confirm this is real, say
+ * close", not a separate manual label cleanup (Shane's stated intent, #4697).
+ *
+ * - `blocked` — the primary case (#4697's own verification target). The
+ *   authoritative blocking mechanism is the `blocked_by` edge; the label is a
+ *   cheap cross-repo index (#4692) and is simply meaningless on a closed issue.
+ * - `in-flight` / `complete` — being retired entirely by the sibling
+ *   BuildConsole issues (#4693/#4694); stripping any a legacy issue still
+ *   carries keeps a closed issue from displaying a retired "being worked on /
+ *   awaiting close" state.
+ *
+ * This is an ALLOWLIST — deliberately NOT `Shane To-Do` (still genuinely
+ * useful, and an action Shane clears himself), and NOT `bug`/`security` (real
+ * cross-repo classification, not workflow state). Nothing outside this list is
+ * ever touched.
+ */
+export const TERMINAL_STATE_LABELS = ["blocked", "in-flight", "complete"] as const;
 
 export interface CloseOneIssueResult {
   number: number;
@@ -9,6 +30,8 @@ export interface CloseOneIssueResult {
   state: string;
   stateReason: string | null;
   comment: { id: number; htmlUrl: string } | null;
+  /** Terminal-state labels actually present-and-removed on this close (never anything else). */
+  strippedLabels: string[];
 }
 
 /**
@@ -51,12 +74,27 @@ export async function closeOneIssue(
 
   const closed = await closeIssue(number, stateReason, repo);
 
+  // Deterministic terminal-state-label cleanup (Feature #4692 / #4697). Runs
+  // AFTER the close so a failed strip can never leave the issue open. Reads the
+  // issue's real current labels and removes only those in TERMINAL_STATE_LABELS
+  // that are actually present — never `Shane To-Do`, `bug`, `security`, or any
+  // other label.
+  const strippedLabels: string[] = [];
+  const currentLabels = await getIssueLabels(number, repo);
+  for (const label of TERMINAL_STATE_LABELS) {
+    if (currentLabels.includes(label)) {
+      await removeIssueLabel(number, label, repo);
+      strippedLabels.push(label);
+    }
+  }
+
   return {
     number: closed.number,
     htmlUrl: closed.htmlUrl,
     state: closed.state,
     stateReason: closed.stateReason,
     comment: postedComment,
+    strippedLabels,
   };
 }
 
@@ -71,7 +109,11 @@ export const closeIssueTool: ToolDef = {
     "Required: context (Git #3538 — a short label identifying which chat/session/build is " +
     "making this write; rejected before any GitHub call if missing). Optional `repo` (Git " +
     "#3580) targets a different repo; defaults to the server's configured repo. When a " +
-    "`comment` is posted, it's prefixed with a visible `[chat: <context>]` tag.",
+    "`comment` is posted, it's prefixed with a visible `[chat: <context>]` tag. On close it " +
+    "unconditionally strips any terminal-state labels the issue carries (" +
+    TERMINAL_STATE_LABELS.map((l) => `\`${l}\``).join(", ") +
+    ") — those are meaningless once closed — and never touches `Shane To-Do`, `bug`, `security`, " +
+    "or any other label. The removed labels are returned in `strippedLabels`.",
   inputSchema: {
     type: "object",
     properties: {
