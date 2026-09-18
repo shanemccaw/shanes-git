@@ -53,6 +53,44 @@ claude mcp add --transport http github-mcp http://127.0.0.1:8770/mcp \
 
 Clients with no header field can use the capability-URL form: `POST /mcp/t/<token>`.
 
+## Server push — SSE subscribe (Git #4782)
+
+A client with no public address (a desktop app behind NAT) cannot be pushed to, so it holds a
+connection open instead and the server writes to it. Same bearer tokens as `/mcp`, both forms:
+
+```
+GET /mcp/subscribe/<channel>              Authorization: Bearer ghmcp_...
+GET /mcp/t/<token>/subscribe/<channel>    token in the path
+```
+
+The response is a Server-Sent Events stream. **The transport is channel-agnostic** — it does not
+know what any channel means. A channel name is 1–60 characters of `A-Za-z0-9_.:-`, case-sensitive.
+
+| Event / line | Meaning |
+|---|---|
+| `event: ready` `data: {"channel":"<name>"}` | Subscription is live; anything published after this arrives. |
+| `event: message` `data: <payload>` | A notification on the channel, verbatim. |
+| `event: resync` `data: {"reason":"listener-reconnected"}` | The server's database listener dropped and came back. Notifications sent during the gap are **gone** — re-fetch state. |
+| `event: revoked` | The bearer token was revoked; the stream then closes. Re-checked every 60 s. |
+| `: keepalive` | Comment line every 15 s so idle-timeout proxies do not cut the stream. |
+
+**Publishing** from server code: `publish(channel, payload)` in `src/pubsub.ts` (JSON-encodes the
+payload, runs `pg_notify`). From psql use the quoted form, because every channel lives under a
+`sg:` Postgres namespace (so a subscriber can never read unrelated NOTIFY channels in the shared
+database): `NOTIFY "sg:<channel>", '<payload>';`
+
+**NOTIFY is not durable and is capped at 8000 bytes** (`publish()` throws over 7999). Publish a
+small invalidation — an id — and have the subscriber fetch the real content over an ordinary
+request; on `resync`, do the same fetch.
+
+`LISTEN` runs on ONE dedicated `pg.Client` held for the life of the process, never on the shared
+pool (a pooled connection can be handed to another query mid-listen and silently break the
+subscription). It reconnects with backoff, re-listens every active channel, and pings itself every
+30 s to catch a dead connection that never raised an event.
+
+Environment (all optional): `GITHUB_MCP_SSE_HEARTBEAT_MS` (default 15000),
+`GITHUB_MCP_SSE_TOKEN_RECHECK_MS` (default 60000).
+
 ## Tools
 
 **Scaffold set (Git #3390)** — three tools prove the auth + PAT + audit spine:
@@ -403,6 +441,12 @@ npm run verify-hierarchy  # Git #3708 — real list_sub_issues/list_blocked_by p
                           # real overflow-title naming against the live #1788->#3706 pattern, and
                           # a real no-redirect-needed resolveOverflowParent read. Never performs a
                           # real add/create write. Needs no database.
+
+npm run verify-sse        # Git #4782 — boots the real HTTP server against the REAL Postgres in
+                          # DATABASE_URL and drives real SSE connections: both auth forms, NOTIFY
+                          # fan-out with no polling, heartbeat, dedicated (non-pool) LISTEN, a
+                          # killed listener backend -> reconnect + resync, the 8000-byte cap,
+                          # token revocation, and a full stop/start. Mints and revokes one token.
 
 npm run verify-labels     # #4697 — real add_label/remove_label true-delta + close_issue's
                           # terminal-state-label strip + `Done` removed from the move_to_status /

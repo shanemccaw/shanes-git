@@ -117,6 +117,21 @@ export function serverHost(): string {
   return process.env.GITHUB_MCP_HOST ?? "0.0.0.0";
 }
 
+function positiveIntEnv(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/** How often an idle SSE stream gets a keep-alive comment (Git #4782). Read per stream, not at load. */
+export function sseHeartbeatMs(): number {
+  return positiveIntEnv("GITHUB_MCP_SSE_HEARTBEAT_MS", 15_000);
+}
+
+/** How often an open SSE stream re-checks that its bearer token has not been revoked (Git #4782). */
+export function sseTokenRecheckMs(): number {
+  return positiveIntEnv("GITHUB_MCP_SSE_TOKEN_RECHECK_MS", 60_000);
+}
+
 /** Port the MCP HTTP endpoint listens on. */
 export function serverPort(): number {
   const raw = process.env.GITHUB_MCP_PORT;

@@ -2,6 +2,7 @@ import { loadEnvLocal, githubPat } from "./env.ts";
 import { logger } from "./logger.ts";
 import { query, closePool } from "./db.ts";
 import { startServer } from "./server.ts";
+import { closePubSub, startListener } from "./pubsub.ts";
 
 /**
  * Boot order, deliberately: load env, confirm the DB (and the token tables) are
@@ -26,11 +27,17 @@ async function main(): Promise<void> {
   }
 
   const server = startServer();
+  // Open the dedicated LISTEN connection now so the first subscriber does not pay for it. A failure
+  // here retries in the background and never stops the server from serving /mcp.
+  startListener();
 
   const shutdown = (signal: string) => {
     logger.info({ signal }, "shutting down");
     server.close();
-    closePool()
+    // Ends open SSE streams and the LISTEN connection first: server.close() alone would wait on them forever.
+    closePubSub()
+      .catch(() => {})
+      .then(() => closePool())
       .catch(() => {})
       .finally(() => process.exit(0));
   };

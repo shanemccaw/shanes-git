@@ -75,6 +75,16 @@ export async function resolveToken(token: string | null): Promise<ResolvedToken 
   return { tokenId: row.id, label: row.label };
 }
 
+/** True while the token row exists and is not revoked. Unlike resolveToken it does not bump call_count,
+ *  so a long-lived stream can re-check itself on a timer without inflating usage. */
+export async function isTokenLive(tokenId: number): Promise<boolean> {
+  const { rows } = await query(
+    `SELECT 1 FROM github_mcp_tokens WHERE id = $1 AND revoked_at IS NULL`,
+    [tokenId],
+  );
+  return rows.length > 0;
+}
+
 export interface TokenSummary {
   id: number;
   label: string;

@@ -7,6 +7,13 @@
 //   POST /mcp/t/<token>  the token in the path — a capability URL for clients with no header
 //                        field. Same class of secret; still revocable, still audited.
 //
+// Server-push (Git #4782) accepts the same two forms:
+//
+//   GET /mcp/subscribe/<channel>            with `Authorization: Bearer ghmcp_...`
+//   GET /mcp/t/<token>/subscribe/<channel>  the token in the path
+//
+// — a Server-Sent Events stream of whatever gets published to <channel>. See subscribe.ts.
+//
 // The GitHub PAT is NOT this bearer token. The bearer authenticates the Claude connection TO this
 // server; the PAT (held in the server's env) is what the server uses to talk to GitHub. Neither is
 // ever echoed to the caller.
@@ -18,9 +25,12 @@ import { resolveToken } from "./tokens.ts";
 import { readBody, sendJson } from "./http.ts";
 import { isPatConfigured } from "./github.ts";
 import { serverHost, serverPort } from "./env.ts";
+import { handleSubscribe } from "./subscribe.ts";
 import { logger } from "./logger.ts";
 
 const MAX_RPC_BYTES = 2_000_000;
+const SUBSCRIBE_HEADER_PREFIX = "/mcp/subscribe/";
+const SUBSCRIBE_PATH_TOKEN_RE = /^\/mcp\/t\/([^/]+)\/subscribe\/(.*)$/;
 
 function bearerFrom(req: IncomingMessage): string | null {
   const header = req.headers.authorization;
@@ -86,7 +96,10 @@ function describeMcpEndpoint(res: ServerResponse): void {
     transport: "streamable-http",
     auth: "Authorization: Bearer ghmcp_... (or POST to /mcp/t/<token>)",
     patConfigured: isPatConfigured(),
-    note: "POST JSON-RPC 2.0 here. GET is informational only; this server does not open an SSE stream.",
+    subscribe:
+      "GET /mcp/subscribe/<channel> (Bearer header) or GET /mcp/t/<token>/subscribe/<channel> " +
+      "opens a Server-Sent Events stream of what is published to that channel.",
+    note: "POST JSON-RPC 2.0 here. GET on /mcp itself is informational only; the SSE stream is at /mcp/subscribe/<channel>.",
   });
 }
 
@@ -94,6 +107,21 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   const pathname = url.pathname;
   const method = req.method ?? "GET";
+
+  // ---- SSE subscribe: same two token forms as /mcp -----------------------------------------
+  if (pathname.startsWith(SUBSCRIBE_HEADER_PREFIX)) {
+    return handleSubscribe(req, res, bearerFrom(req), pathname.slice(SUBSCRIBE_HEADER_PREFIX.length));
+  }
+  const pathTokenSubscribe = SUBSCRIBE_PATH_TOKEN_RE.exec(pathname);
+  if (pathTokenSubscribe) {
+    let pathToken: string;
+    try {
+      pathToken = decodeURIComponent(pathTokenSubscribe[1]);
+    } catch {
+      return void sendJson(res, 400, { error: "Token is not valid percent-encoding." });
+    }
+    return handleSubscribe(req, res, pathToken, pathTokenSubscribe[2]);
+  }
 
   // ---- MCP: authenticated by its own bearer token ----------------------------------------
   if (pathname === "/mcp" || pathname.startsWith("/mcp/t/")) {
