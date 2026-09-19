@@ -18,7 +18,8 @@
     "verify-hierarchy": "node scripts/verify-hierarchy-and-caps.mjs",
     "verify-batch": "node scripts/verify-batch-tools.mjs",
     "verify-labels": "node scripts/verify-labels-and-status.mjs",
-    "verify-sse": "node scripts/verify-sse-subscribe.mjs"
+    "verify-sse": "node scripts/verify-sse-subscribe.mjs",
+    "verify-4822": "node scripts/verify-remove-batch-and-cross-repo-move.mjs"
   },
   "dependencies": {
     "pg": "^8.20.0",

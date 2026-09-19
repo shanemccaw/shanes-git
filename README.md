@@ -328,6 +328,11 @@ others. Every batch tool returns `{ totalAttempted, succeededCount, failedCount,
   moves, same real 5-value status vocabulary and per-item validation as `move_to_status` (an
   invalid `status` string fails only that one item). Success reports
   `{ number, status, projectItemId, addedToBoard, success: true }`.
+- `batch_remove_sub_issues(removals: [{ childNumber, parentNumber }], repo?, context)` — bulk detach
+  (Git #4822): removes each child from its parent WITHOUT re-parenting it and without closing or
+  otherwise touching the child — frees slots on a parent at the 100-sub-issue cap. Same real detach
+  as `remove_sub_issue`, run sequentially with independent per-item success/failure. Returns
+  `{ totalAttempted, succeededCount, failedCount, results: [{ childNumber, parentNumber, success, error? }] }`.
 - `batch_close_issues(closures: [{ number, stateReason, comment? }], repo?, context)` — bulk
   closing, same real per-item `close_issue` logic including the standing Git #2167 rule: a
   `not_planned` closure without a non-empty `comment` fails that item before any GitHub call, and

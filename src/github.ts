@@ -365,9 +365,23 @@ export async function removeSubIssue(
   childNumber: number,
   repo?: { owner: string; repo: string },
 ): Promise<IssueSummary[]> {
+  await detachSubIssue(parentNumber, childNumber, repo);
+  return listSubIssues(parentNumber, repo);
+}
+
+/**
+ * The DELETE half of `removeSubIssue`, without the trailing `listSubIssues`
+ * read — `batch_remove_sub_issues` (Git #4822) runs this once per item, where a
+ * per-item re-list of the parent would be pure overhead. Does not close or
+ * touch the child issue itself.
+ */
+export async function detachSubIssue(
+  parentNumber: number,
+  childNumber: number,
+  repo?: { owner: string; repo: string },
+): Promise<void> {
   const child = await getIssueSummary(childNumber, repo);
   await githubRequest("DELETE", `${repoPath(repo)}/issues/${parentNumber}/sub_issue`, { sub_issue_id: child.id });
-  return listSubIssues(parentNumber, repo);
 }
 
 /**

@@ -103,6 +103,13 @@ export function githubRepo(): { owner: string; repo: string } {
  * existing call site keeps resolving to exactly what it did before this.
  */
 export function resolveRepo(repoArg: unknown): { owner: string; repo: string } {
+  // An already-resolved { owner, repo } passes straight through. Without this, a
+  // helper that re-resolves its caller's resolved value (moveIssueToStatus did —
+  // Git #4822) silently fell back to the default repo and dropped the override.
+  if (typeof repoArg === "object" && repoArg !== null) {
+    const { owner, repo } = repoArg as Record<string, unknown>;
+    if (typeof owner === "string" && owner && typeof repo === "string" && repo) return { owner, repo };
+  }
   if (typeof repoArg !== "string" || !repoArg.trim()) return githubRepo();
   return parseOwnerRepo(repoArg.trim(), "repo");
 }

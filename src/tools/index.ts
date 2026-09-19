@@ -24,6 +24,7 @@ import { searchCodeTool } from "./search-code.ts";
 import { batchReparentSubIssuesTool } from "./batch-reparent-sub-issues.ts";
 import { batchMoveToStatusTool } from "./batch-move-to-status.ts";
 import { batchCloseIssuesTool } from "./batch-close-issues.ts";
+import { batchRemoveSubIssuesTool } from "./batch-remove-sub-issues.ts";
 
 /**
  * Every tool this server exposes. The scaffold set (Git #3390) proved the
@@ -69,6 +70,7 @@ export const ALL_TOOLS: ToolDef[] = [
   batchReparentSubIssuesTool,
   batchMoveToStatusTool,
   batchCloseIssuesTool,
+  batchRemoveSubIssuesTool,
 ];
 
 export const TOOLS_BY_NAME: Map<string, ToolDef> = new Map(ALL_TOOLS.map((t) => [t.name, t]));
